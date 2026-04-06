@@ -1,0 +1,12 @@
+﻿django
+djangorestframework
+psycopg2-binary
+djangorestframework-simplejwt
+pandas
+openpyxl
+scikit-learn
+joblib
+numpy
+bcrypt
+python-dotenv
+django-cors-headers

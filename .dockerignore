@@ -1,0 +1,14 @@
+# Folders
+node_modules/
+venv/
+.env
+
+# Cache
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+
+# Docker
+docker-compose.override.yml

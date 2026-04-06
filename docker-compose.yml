@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16
+    container_name: medical_db
+    env_file:
+      - ./backend/.env
+    environment:
+      POSTGRES_DB: ${DB_NAME:-plateforme_medicale}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nis123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: medical_backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=db  # Très important : ici on pointe vers le service "db" et non localhost
+      - DB_PORT=5432
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: medical_frontend
+    command: sh -c "npm install && npm start"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Protège les modules node locaux contre l'écrasement
+    ports:
+      - "3000:3000"
+    environment:
+      - WATCHPACK_POLLING=true # Pour le rechargement à chaud sur Windows
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
