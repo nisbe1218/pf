@@ -3,36 +3,39 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.sqlite3
-*.log
-.env
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
 .venv/
 venv/
-backend/.venv/
-backend/venv/
+env/
 
-# Django static/media local artifacts
-backend/staticfiles/
-backend/media/
+# Django
+*.log
+local_settings.py
+media/
+staticfiles/
 
-# Node
+# Environment files
+.env
+.env.*
+
+# Node / Frontend
 node_modules/
 frontend/node_modules/
 frontend/build/
 frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Editors / OS
-.vscode/
-.idea/
+# OS / IDE
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 
-# Coverage / test artifacts
-.coverage
-coverage/
-htmlcov/
-.pytest_cache/
-
-# Docker local
-*.pid
-*.seed
+# Build artifacts
+*.tmp
+*.swp
