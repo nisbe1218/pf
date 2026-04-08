@@ -36,9 +36,7 @@ import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import ClearOutlinedIcon from '@mui/icons-material/ClearOutlined';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
-import DataObjectOutlinedIcon from '@mui/icons-material/DataObjectOutlined';
-import PsychologyAltOutlinedIcon from '@mui/icons-material/PsychologyAltOutlined';
-import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
+import AppSidebar from '../../components/common/AppSidebar';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bar, Bubble, Line } from 'react-chartjs-2';
 import {
@@ -55,6 +53,13 @@ import api from '../../services/api/axios';
 import { AuthContext } from '../../context/AuthContext';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
+
+// Ici seulement, place la fonction utilitaire :
+function normalizeIdEnregistrement(id) {
+  if (!id) return '';
+  const num = String(id).replace(/\D/g, '').padStart(6, '0');
+  return `SRC-${num}`;
+}
 
 const emptyForm = {
   id: null,
@@ -190,7 +195,7 @@ const FIXED_BASE_COLUMNS = [
   { key: 'id_patient', label: 'id_patient' },
   { key: 'nom', label: 'nom' },
   { key: 'prenom', label: 'prenom' },
-  { key: 'age', label: 'age' },
+  // patient_id masqué volontairement
 ];
 
 const SECTION_FIELD_MAP = {
@@ -209,6 +214,7 @@ const SECTION_FIELD_MAP = {
 
 const SIMILAR_SCHEMA_FALLBACK_MAP = {
   demographie_sexe: 'sexe',
+  demographie_age_ans: 'age',
   demographie_date_naissance: 'date_naissance',
   irc_etiologie_principale: 'maladie',
 };
@@ -250,6 +256,10 @@ const escapeCsvCell = (value) => {
 };
 
 const extractApiMessage = (requestError, fallbackMessage) => {
+  if (!requestError?.response) {
+    return 'Connexion API impossible. Verifiez que le backend Django est demarre et accessible sur http://localhost:8000/api/.';
+  }
+
   const status = requestError?.response?.status;
   const data = requestError?.response?.data;
 
@@ -332,6 +342,7 @@ function PatientsManagement() {
   const [, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [purging, setPurging] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showAllDynamicColumns, setShowAllDynamicColumns] = useState(false);
@@ -408,7 +419,8 @@ function PatientsManagement() {
 
   const tableSchemaFields = useMemo(() => {
     const fields = schemaTemplate?.fields || [];
-    return [...fields].sort((a, b) => (a.order || 0) - (b.order || 0));
+    // On masque la colonne patient_id (identifiant externe)
+    return [...fields].filter((field) => field.key !== 'patient_id').sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [schemaTemplate]);
 
   const fixedBaseColumns = useMemo(() => {
@@ -745,11 +757,7 @@ function PatientsManagement() {
         return acc + (isNoResponseValue(rawValue) ? 0 : 1);
       }, 0);
       const rate = totalPatients ? Math.round((filled / totalPatients) * 100) : 0;
-      return {
-        label: column.label,
-        filled,
-        rate,
-      };
+      return { rate };
     }).sort((a, b) => a.rate - b.rate);
 
     const averageCompleteness = fillRates.length
@@ -1237,6 +1245,14 @@ function PatientsManagement() {
     await loadPatients(filters);
   };
 
+  const handleToggleDynamicColumns = () => {
+    setShowAllDynamicColumns((current) => {
+      const next = !current;
+      setSuccess(next ? 'Toutes les colonnes dynamiques sont affichees.' : 'Affichage des colonnes dynamiques limite.');
+      return next;
+    });
+  };
+
   const handleSave = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -1364,6 +1380,28 @@ function PatientsManagement() {
     fileInputRef.current?.click();
   };
 
+  const handlePurgeImportedData = async () => {
+    const confirmed = window.confirm('Supprimer toutes les donnees patients importees de la base et de la plateforme ?');
+    if (!confirmed) {
+      return;
+    }
+
+    setPurging(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api.delete('patients/purge/');
+      setPatients([]);
+      setSelectedPatientIds([]);
+      resetForm();
+      setSuccess('Toutes les donnees importees ont ete supprimees.');
+    } catch (requestError) {
+      setError(extractApiMessage(requestError, 'Suppression globale impossible.'));
+    } finally {
+      setPurging(false);
+    }
+  };
+
   const handleExportExcel = () => {
     setError('');
     try {
@@ -1374,9 +1412,9 @@ function PatientsManagement() {
       ];
 
       const rows = visiblePatients.map((patient) => [
-        ...fixedBaseColumns.map((column) => renderValue(resolveTableCellValue(patient, column.key))),
-        ...tableDisplaySchemaFields.map((field) => renderValue(resolveTableCellValue(patient, field.key))),
-        ...visibleExtraColumns.map((columnKey) => renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]))),
+        ...fixedBaseColumns.map((column) => renderValue(resolveTableCellValue(patient, column.key), column.key, patient)),
+        ...tableDisplaySchemaFields.map((field) => renderValue(resolveTableCellValue(patient, field.key), field.key, patient)),
+        ...visibleExtraColumns.map((columnKey) => renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]), columnKey, patient)),
       ]);
 
       const csvContent = [headerRow, ...rows]
@@ -1410,13 +1448,32 @@ function PatientsManagement() {
     setSuccess('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await api.post('patients/import/', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const buildFormData = () => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return formData;
+      };
+
+      let response;
+      try {
+        response = await api.post('patients/import/', buildFormData(), {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+      } catch (primaryError) {
+        const isRouteIssue = primaryError?.response?.status === 404;
+        if (!isRouteIssue) {
+          throw primaryError;
+        }
+
+        // Backward compatibility with older backend route naming.
+        response = await api.post('patients/import-excel/', buildFormData(), {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+      }
 
       const importedFields = response.data?.fields_created || 0;
       const patientsCreated = response.data?.patients_created || 0;
@@ -1435,29 +1492,30 @@ function PatientsManagement() {
       await loadSchema();
       await loadPatients();
     } catch (requestError) {
-      setError(extractApiMessage(requestError, 'Import de la structure Excel impossible.'));
+      const apiMessage = extractApiMessage(requestError, 'Import de la structure Excel impossible.');
+      setError(`Import de la structure Excel impossible. ${apiMessage}`);
     } finally {
       setImporting(false);
       event.target.value = '';
     }
   };
 
-  const renderValue = (value) => {
+  const renderValue = (value, key) => {
     if (value === null || value === undefined || value === '') {
       return '-';
     }
-
+    if (key === 'id_enregistrement_source') {
+      return normalizeIdEnregistrement(value);
+    }
     if (typeof value === 'string') {
       const normalized = value.trim().toLowerCase();
       if (normalized === 'x' || normalized === '-') {
         return '-';
       }
     }
-
     if (typeof value === 'object') {
       return safeStringify(value);
     }
-
     return value;
   };
 
@@ -1510,113 +1568,7 @@ function PatientsManagement() {
     >
       <Grid container spacing={2} alignItems="flex-start">
         <Grid item xs={12} md={3} lg={2}>
-          <Card
-            elevation={0}
-            sx={{
-              borderRadius: 5,
-              border: '1px solid rgba(15, 63, 81, 0.14)',
-              background: 'linear-gradient(165deg, rgba(255,255,255,0.98) 0%, rgba(232,244,250,0.94) 100%)',
-              boxShadow: '0 18px 42px rgba(15, 63, 81, 0.10)',
-              overflow: 'hidden',
-              position: { md: 'sticky' },
-              top: { md: 16 },
-            }}
-          >
-            <Box
-              sx={{
-                p: 2,
-                background: 'linear-gradient(120deg, #0f3f51 0%, #1a6b84 100%)',
-                color: 'white',
-              }}
-            >
-              <Typography variant="caption" sx={{ opacity: 0.85, letterSpacing: 1.1 }}>
-                CONTROL CENTER
-              </Typography>
-              <Typography variant="subtitle1" fontWeight={900}>
-                Navigation intelligente
-              </Typography>
-            </Box>
-
-            <CardContent sx={{ p: 2 }}>
-              <Stack spacing={1.25}>
-                <Button
-                  fullWidth
-                  variant="text"
-                  startIcon={<ArrowBackOutlinedIcon />}
-                  onClick={() => navigate('/dashboard')}
-                  aria-label="Retourner au tableau de bord"
-                  sx={{
-                    justifyContent: 'center',
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    borderRadius: 2.5,
-                    py: 0.85,
-                    px: 1.5,
-                    color: '#0f3f51',
-                    minWidth: 0,
-                    '& .MuiButton-startIcon': {
-                      margin: 0,
-                    },
-                    '&:hover': {
-                      backgroundColor: 'rgba(15,63,81,0.08)',
-                    },
-                  }}
-                />
-                <Button
-                  fullWidth
-                  variant={mainSection === 'data_patient' ? 'contained' : 'outlined'}
-                  startIcon={<DataObjectOutlinedIcon />}
-                  onClick={() => navigate('/patients')}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontWeight: 800,
-                    borderRadius: 2.5,
-                    py: 1,
-                    px: 1.5,
-                    borderColor: 'rgba(15, 63, 81, 0.22)',
-                    color: mainSection === 'data_patient' ? 'white' : '#0f3f51',
-                    background: mainSection === 'data_patient' ? 'linear-gradient(115deg, #0f3f51 0%, #1f7a8c 100%)' : 'rgba(255,255,255,0.8)',
-                    boxShadow: mainSection === 'data_patient' ? '0 10px 26px rgba(15, 63, 81, 0.25)' : 'none',
-                    transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
-                    '&:hover': {
-                      transform: 'translateY(-1px)',
-                      boxShadow: '0 12px 24px rgba(15, 63, 81, 0.18)',
-                      background: mainSection === 'data_patient' ? 'linear-gradient(115deg, #0f3f51 0%, #1f7a8c 100%)' : 'rgba(15,63,81,0.06)',
-                    },
-                  }}
-                >
-                  Data patient
-                </Button>
-                <Button
-                  fullWidth
-                  variant={mainSection === 'modele_ai' ? 'contained' : 'outlined'}
-                  startIcon={<PsychologyAltOutlinedIcon />}
-                  onClick={() => navigate('/modele-ai')}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontWeight: 800,
-                    borderRadius: 2.5,
-                    py: 1,
-                    px: 1.5,
-                    borderColor: 'rgba(15, 63, 81, 0.22)',
-                    color: mainSection === 'modele_ai' ? 'white' : '#0f3f51',
-                    background: mainSection === 'modele_ai' ? 'linear-gradient(115deg, #114b5f 0%, #16867a 100%)' : 'rgba(255,255,255,0.8)',
-                    boxShadow: mainSection === 'modele_ai' ? '0 10px 26px rgba(17, 75, 95, 0.25)' : 'none',
-                    transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
-                    '&:hover': {
-                      transform: 'translateY(-1px)',
-                      boxShadow: '0 12px 24px rgba(17, 75, 95, 0.18)',
-                      background: mainSection === 'modele_ai' ? 'linear-gradient(115deg, #114b5f 0%, #16867a 100%)' : 'rgba(17,75,95,0.08)',
-                    },
-                  }}
-                >
-                  Modele AI
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
+          <AppSidebar />
         </Grid>
 
         <Grid item xs={12} md={9} lg={10}>
@@ -1673,24 +1625,6 @@ function PatientsManagement() {
                 <Box component="form" onSubmit={handleSave} sx={{ display: 'grid', gap: 2 }}>
                   <TextField label="Nom" name="nom" value={form.nom} onChange={handleChange} required fullWidth size="small" />
                   <TextField label="Prénom" name="prenom" value={form.prenom} onChange={handleChange} required fullWidth size="small" />
-                  <TextField label="Âge" name="age" type="number" value={form.age} onChange={handleChange} fullWidth size="small" />
-                  <TextField select label="Sexe" name="sexe" value={form.sexe} onChange={handleChange} fullWidth size="small">
-                    <MenuItem value="">Sélectionner</MenuItem>
-                    <MenuItem value="M">Homme</MenuItem>
-                    <MenuItem value="F">Femme</MenuItem>
-                    <MenuItem value="O">Autre</MenuItem>
-                  </TextField>
-                  <TextField label="Maladie" name="maladie" value={form.maladie} onChange={handleChange} fullWidth size="small" />
-                  <TextField
-                    label="Date de naissance"
-                    name="date_naissance"
-                    type="date"
-                    value={form.date_naissance}
-                    onChange={handleChange}
-                    fullWidth
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                  />
                   {schemaTemplate?.fields?.length ? (
                     <Box
                       sx={{
@@ -1758,7 +1692,7 @@ function PatientsManagement() {
                               }}
                             >
                               {(field.choices || []).map((choice) => (
-                                <MenuItem key={`${field.id}-${choice}`} value={choice}>{choice}</MenuItem>
+                                <MenuItem key={`${field.id}-dlg-m-${choice}`} value={choice}>{choice}</MenuItem>
                               ))}
                             </TextField>
                           );
@@ -1779,7 +1713,7 @@ function PatientsManagement() {
                           );
                         }
 
-                        if (field.field_type === 'integer') {
+                        if (field.field_type === 'integer' || field.field_type === 'decimal') {
                           return (
                             <TextField
                               key={field.id}
@@ -1789,6 +1723,7 @@ function PatientsManagement() {
                               onChange={(event) => handleSchemaAnswerChange(field, event.target.value)}
                               size="small"
                               fullWidth
+                              inputProps={field.field_type === 'decimal' ? { step: 'any' } : undefined}
                             />
                           );
                         }
@@ -1958,10 +1893,21 @@ function PatientsManagement() {
                           variant="outlined"
                           onClick={handleImportClick}
                           startIcon={<UploadFileOutlinedIcon />}
-                          disabled={importing}
+                          disabled={importing || purging}
                           sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700, whiteSpace: 'nowrap' }}
                         >
                           {importing ? 'Import...' : 'Importer Excel'}
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          startIcon={<DeleteOutlineOutlinedIcon />}
+                          onClick={handlePurgeImportedData}
+                          disabled={importing || purging}
+                          sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700, whiteSpace: 'nowrap' }}
+                        >
+                          {purging ? 'Suppression...' : 'Vider donnees importees'}
                         </Button>
                         <input
                           ref={fileInputRef}
@@ -1976,8 +1922,8 @@ function PatientsManagement() {
                         {extraColumns.length > INITIAL_DYNAMIC_COLUMNS_LIMIT && (
                           <Button
                             size="small"
-                            variant="text"
-                            onClick={() => setShowAllDynamicColumns((current) => !current)}
+                            variant={showAllDynamicColumns ? 'outlined' : 'contained'}
+                            onClick={handleToggleDynamicColumns}
                             sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700 }}
                           >
                             {showAllDynamicColumns
@@ -2096,19 +2042,19 @@ function PatientsManagement() {
                             </TableCell>
                             {fixedBaseColumns.map((column) => (
                               <TableCell key={`${patient.id}-fixed-${column.key}`}>
-                                {renderValue(resolveTableCellValue(patient, column.key))}
+                                {renderValue(resolveTableCellValue(patient, column.key), column.key, patient)}
                               </TableCell>
                             ))}
                             {tableDisplaySchemaFields.length ? tableDisplaySchemaFields.map((field) => (
                               <TableCell key={`${patient.id}-${field.id}`}>
-                                {renderValue(resolveTableCellValue(patient, field.key))}
+                                {renderValue(resolveTableCellValue(patient, field.key), field.key)}
                               </TableCell>
                             )) : (
                               <TableCell>Importez le modèle Excel (Classeur1) pour générer les colonnes.</TableCell>
                             )}
                             {visibleExtraColumns.map((columnKey) => (
                               <TableCell key={`${patient.id}-extra-${columnKey}`}>
-                                {renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]))}
+                                {renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]), columnKey)}
                               </TableCell>
                             ))}
                           </TableRow>
@@ -2609,7 +2555,7 @@ function PatientsManagement() {
                     );
                   }
 
-                  if (field.field_type === 'integer') {
+                  if (field.field_type === 'integer' || field.field_type === 'decimal') {
                     return (
                       <TextField
                         key={field.id}
@@ -2619,6 +2565,7 @@ function PatientsManagement() {
                         onChange={(event) => handleSchemaAnswerChange(field, event.target.value)}
                         size="small"
                         fullWidth
+                        inputProps={field.field_type === 'decimal' ? { step: 'any' } : undefined}
                       />
                     );
                   }

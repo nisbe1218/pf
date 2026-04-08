@@ -44,6 +44,20 @@ class Patient(models.Model):
 	class Meta:
 		ordering = ['-created_at', '-id']
 
+	def save(self, *args, **kwargs):
+		super().save(*args, **kwargs)
+
+		updates = []
+		if not self.id_patient:
+			self.id_patient = f"PAT-{self.pk:06d}"
+			updates.append('id_patient')
+		if not self.id_enregistrement_source:
+			self.id_enregistrement_source = f"SRC-{self.pk:06d}"
+			updates.append('id_enregistrement_source')
+
+		if updates:
+			super().save(update_fields=updates)
+
 	def __str__(self):
 		return f"{self.prenom} {self.nom}"
 
@@ -66,6 +80,7 @@ class PatientFormField(models.Model):
 		('multiple_choice', 'Choix multiple'),
 		('date', 'Sélecteur de date'),
 		('integer', 'Nombre entier'),
+		('decimal', 'Nombre décimal'),
 		('boolean', 'Oui / Non'),
 		('auto', 'Automatique'),
 	]

@@ -13,27 +13,21 @@ import {
   MenuItem,
   Paper,
   Stack,
+  SvgIcon,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   TextField,
   Typography,
 } from '@mui/material';
 import api from '../../services/api/axios';
 import { AuthContext } from '../../context/AuthContext';
 import CallOutlinedIcon from '@mui/icons-material/CallOutlined';
-import DataObjectOutlinedIcon from '@mui/icons-material/DataObjectOutlined';
+import AppSidebar from '../../components/common/AppSidebar';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
-import PsychologyAltOutlinedIcon from '@mui/icons-material/PsychologyAltOutlined';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const roleLabels = {
@@ -79,6 +73,7 @@ function Dashboard() {
   const location = useLocation();
   const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [adminPassword, setAdminPassword] = useState('');
   const [revealDialogOpen, setRevealDialogOpen] = useState(false);
@@ -92,6 +87,7 @@ function Dashboard() {
   const [success, setSuccess] = useState('');
 
   const isAdminScope = user?.role === 'super_admin' || user?.role === 'chef_service';
+  const isDashboardActive = location.pathname.startsWith('/dashboard');
   const isPatientsActive = location.pathname.startsWith('/patients');
   const isModelAiActive = location.pathname.startsWith('/modele-ai');
 
@@ -107,18 +103,33 @@ function Dashboard() {
       visibleUsers: managedUsers.length,
       activeUsers: managedUsers.filter((managedUser) => managedUser.is_active).length,
       inactiveUsers: managedUsers.filter((managedUser) => !managedUser.is_active).length,
+      professorsCount: managedUsers.filter((managedUser) => managedUser.role?.nom === 'professeur').length,
+      residentsCount: managedUsers.filter((managedUser) => managedUser.role?.nom === 'resident').length,
       rolesCount: roles.length,
     };
   }, [roles.length, user?.role, users]);
 
   const manageableUsers = useMemo(() => {
+    const lower = search.trim().toLowerCase();
     return users.filter((managedUser) => {
-      if (user?.role === 'super_admin') {
+      const allowed = user?.role === 'super_admin'
+        || managedUser.role?.nom === 'professeur'
+        || managedUser.role?.nom === 'resident';
+      if (!allowed) {
+        return false;
+      }
+      if (!lower) {
         return true;
       }
-      return managedUser.role?.nom === 'professeur' || managedUser.role?.nom === 'resident';
+      return [
+        managedUser.email,
+        managedUser.nom,
+        managedUser.prenom,
+        managedUser.role?.label,
+        managedUser.role?.nom,
+      ].some((value) => value?.toLowerCase().includes(lower));
     });
-  }, [user?.role, users]);
+  }, [user?.role, users, search]);
 
   const resolveRoleById = (roleId) => {
     return roles.find((role) => String(role.id) === String(roleId)) || null;
@@ -323,95 +334,12 @@ function Dashboard() {
         minHeight: '100vh',
         py: { xs: 2, md: 3 },
         px: { xs: 0, md: 1 },
-        background: 'radial-gradient(circle at top left, rgba(77, 142, 166, 0.16), transparent 24%), radial-gradient(circle at bottom right, rgba(31, 157, 138, 0.12), transparent 20%), linear-gradient(180deg, #f2f7fb 0%, #edf3f8 100%)',
+        background: 'radial-gradient(circle at top left, rgba(102, 190, 219, 0.18), transparent 22%), radial-gradient(circle at bottom right, rgba(163, 221, 228, 0.14), transparent 18%), linear-gradient(180deg, #eaf7fb 0%, #f4fbff 100%)',
       }}
     >
       <Grid container spacing={2} alignItems="flex-start">
         <Grid item xs={12} md={3} lg={2}>
-          <Card
-            elevation={0}
-            sx={{
-              borderRadius: 5,
-              border: '1px solid rgba(15, 63, 81, 0.14)',
-              background: 'linear-gradient(165deg, rgba(255,255,255,0.98) 0%, rgba(232,244,250,0.94) 100%)',
-              boxShadow: '0 18px 42px rgba(15, 63, 81, 0.10)',
-              overflow: 'hidden',
-              position: { md: 'sticky' },
-              top: { md: 16 },
-            }}
-          >
-            <Box
-              sx={{
-                p: 2,
-                background: 'linear-gradient(120deg, #0f3f51 0%, #1a6b84 100%)',
-                color: 'white',
-              }}
-            >
-              <Typography variant="caption" sx={{ opacity: 0.85, letterSpacing: 1.1 }}>
-                CONTROL CENTER
-              </Typography>
-              <Typography variant="subtitle1" fontWeight={900}>
-                Navigation intelligente
-              </Typography>
-            </Box>
-
-            <CardContent sx={{ p: 2 }}>
-              <Stack spacing={1.25}>
-                <Button
-                  fullWidth
-                  variant={isPatientsActive ? 'contained' : 'outlined'}
-                  startIcon={<DataObjectOutlinedIcon />}
-                  onClick={() => navigate('/patients')}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontWeight: 800,
-                    borderRadius: 2.5,
-                    py: 1,
-                    px: 1.5,
-                    borderColor: 'rgba(15, 63, 81, 0.22)',
-                    color: isPatientsActive ? 'white' : '#0f3f51',
-                    background: isPatientsActive ? 'linear-gradient(115deg, #0f3f51 0%, #1f7a8c 100%)' : 'rgba(255,255,255,0.8)',
-                    boxShadow: isPatientsActive ? '0 10px 26px rgba(15, 63, 81, 0.25)' : 'none',
-                    transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
-                    '&:hover': {
-                      transform: 'translateY(-1px)',
-                      boxShadow: '0 12px 24px rgba(15, 63, 81, 0.18)',
-                      background: isPatientsActive ? 'linear-gradient(115deg, #0f3f51 0%, #1f7a8c 100%)' : 'rgba(15,63,81,0.06)',
-                    },
-                  }}
-                >
-                  Data patient
-                </Button>
-                <Button
-                  fullWidth
-                  variant={isModelAiActive ? 'contained' : 'outlined'}
-                  startIcon={<PsychologyAltOutlinedIcon />}
-                  onClick={() => navigate('/modele-ai')}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontWeight: 800,
-                    borderRadius: 2.5,
-                    py: 1,
-                    px: 1.5,
-                    borderColor: 'rgba(15, 63, 81, 0.22)',
-                    color: isModelAiActive ? 'white' : '#0f3f51',
-                    background: isModelAiActive ? 'linear-gradient(115deg, #114b5f 0%, #16867a 100%)' : 'rgba(255,255,255,0.8)',
-                    boxShadow: isModelAiActive ? '0 10px 26px rgba(17, 75, 95, 0.25)' : 'none',
-                    transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
-                    '&:hover': {
-                      transform: 'translateY(-1px)',
-                      boxShadow: '0 12px 24px rgba(17, 75, 95, 0.18)',
-                      background: isModelAiActive ? 'linear-gradient(115deg, #114b5f 0%, #16867a 100%)' : 'rgba(17,75,95,0.08)',
-                    },
-                  }}
-                >
-                  Modele AI
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
+          <AppSidebar />
         </Grid>
 
         <Grid item xs={12} md={9} lg={10}>
@@ -421,7 +349,7 @@ function Dashboard() {
           mb: 3,
           p: { xs: 2.5, md: 3.5 },
           borderRadius: 5,
-          background: 'linear-gradient(135deg, #0f3f51 0%, #165a72 45%, #1f7a8c 100%)',
+          background: 'linear-gradient(135deg, #2C6975 0%, #68B2A0 45%, #CDE0C9 100%)',
           color: 'white',
           overflow: 'hidden',
           position: 'relative',
@@ -475,8 +403,8 @@ function Dashboard() {
       {success && <Alert severity="success" sx={{ mb: 3 }}>{success}</Alert>}
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} lg={3}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: 'primary.main' }}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#2C6975' }}>
             <CardContent sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">
                 Comptes visibles
@@ -490,8 +418,8 @@ function Dashboard() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} lg={3}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: 'success.main' }}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#68B2A0' }}>
             <CardContent sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">
                 Actifs
@@ -505,8 +433,8 @@ function Dashboard() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} lg={3}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: 'warning.main' }}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#CDE0C9' }}>
             <CardContent sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">
                 Inactifs
@@ -520,8 +448,38 @@ function Dashboard() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} lg={3}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: 'info.main' }}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#2C6975' }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Typography variant="overline" color="text.secondary">
+                Professeurs
+              </Typography>
+              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                {stats.professorsCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Nombre de professeurs gérés.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#68B2A0' }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Typography variant="overline" color="text.secondary">
+                Résidents
+              </Typography>
+              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                {stats.residentsCount}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Nombre de résidents gérés.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#E0ECDE' }}>
             <CardContent sx={{ p: 2.5 }}>
               <Typography variant="overline" color="text.secondary">
                 Rôles chargés
@@ -570,7 +528,7 @@ function Dashboard() {
                     </Box>
                     <Chip
                       label={roleLabels[user?.role] || 'Utilisateur'}
-                      sx={{ fontWeight: 800, bgcolor: 'rgba(22, 90, 114, 0.10)', color: 'primary.dark' }}
+                      sx={{ fontWeight: 800, bgcolor: 'rgba(44, 105, 117, 0.10)', color: '#2C6975' }}
                     />
                   </Stack>
 
@@ -578,8 +536,8 @@ function Dashboard() {
                     sx={{
                       p: 2.25,
                       borderRadius: 4,
-                      background: 'linear-gradient(135deg, rgba(22,90,114,0.10), rgba(31,157,138,0.07))',
-                      border: '1px solid rgba(94, 115, 141, 0.10)',
+                      background: 'linear-gradient(135deg, rgba(44,105,117,0.10), rgba(104,178,160,0.08))',
+                      border: '1px solid rgba(108, 178, 160, 0.18)',
                       mb: 2.5,
                     }}
                   >
@@ -588,9 +546,9 @@ function Dashboard() {
                         sx={{
                           width: 58,
                           height: 58,
-                          bgcolor: 'primary.main',
+                          bgcolor: '#2C6975',
                           fontWeight: 900,
-                          boxShadow: '0 10px 24px rgba(22, 90, 114, 0.25)',
+                          boxShadow: '0 10px 24px rgba(44, 105, 117, 0.25)',
                         }}
                       >
                         {(user?.prenom?.[0] || '') + (user?.nom?.[0] || '')}
@@ -799,70 +757,99 @@ function Dashboard() {
 
             <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94, 115, 141, 0.12)' }}>
               <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 2 }}>
-                  Comptes gérés
-                </Typography>
-                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, overflowX: 'auto' }}>
-                  <Table size="small" sx={{ minWidth: 860 }}>
-                    <TableHead>
-                      <TableRow sx={{ background: 'linear-gradient(135deg, rgba(22,90,114,0.08), rgba(31,122,140,0.14))' }}>
-                        <TableCell sx={{ fontWeight: 800 }}>Email</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Nom</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Prénom</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Téléphone</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Rôle</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Mot de passe haché</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }}>Statut</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 800 }}>Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {manageableUsers.map((managedUser) => (
-                        <TableRow key={managedUser.id} hover>
-                          <TableCell>{managedUser.email}</TableCell>
-                          <TableCell>{managedUser.nom}</TableCell>
-                          <TableCell>{managedUser.prenom}</TableCell>
-                          <TableCell>{managedUser.telephone || '-'}</TableCell>
-                          <TableCell>{managedUser.role?.label || managedUser.role?.nom || '-'}</TableCell>
-                          <TableCell>
-                            <Box
-                              sx={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'flex-start',
-                                gap: 1,
-                                px: 1.25,
-                                py: 0.9,
-                                minHeight: 52,
-                                borderRadius: 2,
-                                backgroundColor: 'rgba(22, 90, 114, 0.08)',
-                                border: '1px solid rgba(22, 90, 114, 0.18)',
-                                maxWidth: 380,
-                              }}
-                            >
-                              <Typography
-                                variant="caption"
-                                component="code"
+                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems="center" justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
+                  <Typography variant="h6" fontWeight={800}>
+                    Comptes gérés
+                  </Typography>
+                  <TextField
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Rechercher un utilisateur..."
+                    size="small"
+                    sx={{ width: { xs: '100%', sm: 320 } }}
+                  />
+                </Stack>
+                <Grid container spacing={2}>
+                  {manageableUsers.length ? manageableUsers.map((managedUser) => (
+                    <Grid item xs={12} sm={6} md={4} key={managedUser.id}>
+                      <Card
+                        elevation={0}
+                        sx={{
+                          borderRadius: 4,
+                          bgcolor: 'rgba(255,255,255,0.96)',
+                          border: '1px solid rgba(94, 115, 141, 0.12)',
+                          minHeight: 240,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <CardContent sx={{ p: 2.5 }}>
+                          <Stack spacing={1.5}>
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48, fontWeight: 700 }}>
+                                {(managedUser.nom?.[0] || managedUser.prenom?.[0] || 'U').toUpperCase()}
+                              </Avatar>
+                              <Box>
+                                <Typography variant="subtitle1" fontWeight={800}>
+                                  {managedUser.nom || '-'} {managedUser.prenom || ''}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {managedUser.email || '-'}
+                                </Typography>
+                              </Box>
+                            </Stack>
+
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Chip
+                                label={managedUser.is_active ? 'Actif' : 'Inactif'}
+                                color={managedUser.is_active ? 'success' : 'error'}
+                                size="small"
+                              />
+                            </Stack>
+
+                            <Stack spacing={0.75}>
+                              <Typography variant="caption" color="text.secondary">Téléphone</Typography>
+                              <Typography variant="body2">{managedUser.telephone || '-'}</Typography>
+                            </Stack>
+
+                            <Stack spacing={0.75}>
+                              <Typography variant="caption" color="text.secondary">Rôle</Typography>
+                              <Typography variant="body2">{managedUser.role?.label || managedUser.role?.nom || '-'}</Typography>
+                            </Stack>
+
+                            <Stack spacing={0.75}>
+                              <Typography variant="caption" color="text.secondary">Mot de passe haché</Typography>
+                              <Box
                                 sx={{
-                                  fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-                                  wordBreak: 'break-all',
-                                  flex: 1,
-                                  minWidth: 0,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 1,
+                                  px: 1.25,
+                                  py: 0.9,
+                                  borderRadius: 2,
+                                  backgroundColor: 'rgba(22, 90, 114, 0.08)',
+                                  border: '1px solid rgba(22, 90, 114, 0.18)',
                                 }}
                               >
-                                {formatHashSnippet(managedUser.password_hash || 'HASH')}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={managedUser.is_active ? 'Actif' : 'Inactif'}
-                              color={managedUser.is_active ? 'success' : 'default'}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                <Typography
+                                  variant="caption"
+                                  component="code"
+                                  sx={{
+                                    fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+                                    wordBreak: 'break-all',
+                                    flex: 1,
+                                  }}
+                                >
+                                  {formatHashSnippet(managedUser.password_hash || 'HASH')}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                          </Stack>
+                        </CardContent>
+
+                        <Box sx={{ p: 2.5, pt: 0 }}>
+                          <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={1}>
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -882,20 +869,18 @@ function Dashboard() {
                               >
                                 <DeleteOutlineOutlinedIcon fontSize="small" />
                               </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {!manageableUsers.length && (
-                        <TableRow>
-                          <TableCell colSpan={8} align="center">
-                            Aucun compte disponible.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                          </Stack>
+                        </Box>
+                      </Card>
+                    </Grid>
+                  )) : (
+                    <Grid item xs={12}>
+                      <Typography align="center" color="text.secondary">
+                        Aucun compte disponible.
+                      </Typography>
+                    </Grid>
+                  )}
+                </Grid>
               </CardContent>
             </Card>
           </Grid>

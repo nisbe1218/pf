@@ -3,6 +3,7 @@ import uuid
 import json
 
 import pandas as pd
+from django.db import connection
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -71,6 +72,17 @@ STANDARD_FIELD_ALIASES = {
 }
 
 SECTION_FIELD_ALIASES = {
+	'age': 'demographie_age_ans',
+	'age_years': 'demographie_age_ans',
+	'age_in_years': 'demographie_age_ans',
+	'patient_age': 'demographie_age_ans',
+	'years': 'demographie_age_ans',
+	'demographie_age': 'demographie_age_ans',
+	'demographie_age_years': 'demographie_age_ans',
+	'demographic_age': 'demographie_age_ans',
+	'demographic_age_years': 'demographie_age_ans',
+	'demography_age': 'demographie_age_ans',
+	'demography_age_years': 'demographie_age_ans',
 	'gender': 'demographie_sexe',
 	'sex': 'demographie_sexe',
 	'dob': 'demographie_date_naissance',
@@ -247,6 +259,7 @@ TYPE_MAP = {
 	'liste a choix multiple': 'multiple_choice',
 	'selecteur de date': 'date',
 	'nombre entier': 'integer',
+	'nombre decimal': 'decimal',
 	'oui/non': 'boolean',
 	'genere automatiquement': 'auto',
 }
@@ -357,6 +370,8 @@ DEATH_CAUSE_CODE_MAP = {
 }
 
 FIXED_CLASSEUR_TEMPLATE_NAMES = [
+	'template',
+	'template_patients_hd',
 	'plateform_donnees_complete',
 	'classeur1',
 ]
@@ -365,6 +380,88 @@ AUTO_INCREMENT_FIELD_PREFIX = {
 	'id_patient': 'PAT',
 	'id_enregistrement_source': 'SRC',
 }
+
+POSTGRES_MODEL_FIELD_MAP = {
+	'id_patient': 'id_patient',
+	'id_enregistrement_source': 'id_enregistrement_source',
+	'id_site': 'id_site',
+	'statut_inclusion': 'statut_inclusion',
+	'statut_consentement': 'statut_consentement',
+	'utilisateur_saisie': 'utilisateur_saisie',
+	'derniere_mise_a_jour': 'derniere_mise_a_jour',
+	'date_evaluation_initiale': 'date_evaluation_initiale',
+	'nom': 'nom',
+	'prenom': 'prenom',
+	'age': 'age',
+	'sexe': 'sexe',
+	'maladie': 'maladie',
+	'telephone': 'telephone',
+	'adresse': 'adresse',
+	'date_naissance': 'date_naissance',
+	'date_admission': 'date_admission',
+}
+
+POSTGRES_SECTION_BUCKETS = [
+	('demographie_', 'demographie_data'),
+	('irc_', 'irc_data'),
+	('comorbidite_', 'comorbidite_data'),
+	('presentation_', 'presentation_data'),
+	('biologie_', 'biologie_data'),
+	('imagerie_', 'imagerie_data'),
+	('dialyse_', 'dialyse_data'),
+	('qualite_', 'qualite_data'),
+	('complication_', 'complication_data'),
+	('traitement_', 'traitement_data'),
+	('devenir_', 'devenir_data'),
+]
+
+
+def _pg_quote_identifier(value):
+	return '"' + str(value).replace('"', '""') + '"'
+
+
+def _pg_quote_literal(value):
+	return "'" + str(value).replace("'", "''") + "'"
+
+
+def refresh_postgres_flat_view(template=None):
+	if template is None:
+		template = PatientFormTemplate.objects.filter(name__iexact='template').order_by('-id').first()
+		if template is None:
+			template = PatientFormTemplate.objects.order_by('-id').first()
+
+	if template is None:
+		return
+
+	keys = list(template.fields.order_by('order', 'id').values_list('key', flat=True))
+	if not keys:
+		return
+
+	select_parts = ['p.id AS id']
+	for key in keys:
+		if key in POSTGRES_MODEL_FIELD_MAP:
+			expr = f"p.{POSTGRES_MODEL_FIELD_MAP[key]}"
+		else:
+			bucket = None
+			for prefix, column_name in POSTGRES_SECTION_BUCKETS:
+				if key.startswith(prefix):
+					bucket = column_name
+					break
+
+			if bucket:
+				expr = f"p.{bucket} ->> {_pg_quote_literal(key)}"
+			else:
+				expr = f"p.extra_data ->> {_pg_quote_literal(key)}"
+
+		select_parts.append(f"{expr} AS {_pg_quote_identifier(key)}")
+
+	sql = (
+		'CREATE OR REPLACE VIEW public.patients_plateforme_flat AS '
+		'SELECT ' + ', '.join(select_parts) + ' FROM patients_patient p'
+	)
+
+	with connection.cursor() as cursor:
+		cursor.execute(sql)
 
 
 def normalize_header(value):
@@ -602,12 +699,12 @@ def is_schema_template_sheet(worksheet):
 
 
 def create_or_update_template(worksheet, source_file_name):
-	template_name = worksheet.title or 'Patient Schema'
+	template_name = (worksheet.title if worksheet else None) or 'Patient Schema'
 	template, _ = PatientFormTemplate.objects.update_or_create(
 		name=template_name,
 		defaults={
 			'source_file_name': source_file_name or template_name,
-			'sheet_name': worksheet.title,
+			'sheet_name': worksheet.title if worksheet else template_name,
 		},
 	)
 	return template
@@ -645,11 +742,33 @@ def parse_schema_from_template_sheet(worksheet, source_file_name):
 		)
 
 	PatientFormField.objects.bulk_create(created_fields)
+	# Keep the SQL projection aligned with current Django/template columns.
+	try:
+		refresh_postgres_flat_view(template)
+	except Exception:
+		pass
 	return template, len(created_fields)
 
 
 def upsert_template_from_headers(headers, worksheet, source_file_name):
-	template = create_or_update_template(worksheet, source_file_name)
+	template = None
+	for template_name in FIXED_CLASSEUR_TEMPLATE_NAMES:
+		template = (
+			PatientFormTemplate.objects.filter(name__iexact=template_name).order_by('-id').first()
+			or PatientFormTemplate.objects.filter(sheet_name__iexact=template_name).order_by('-id').first()
+		)
+		if template:
+			break
+
+	if template is None:
+		template = create_or_update_template(worksheet, source_file_name)
+	else:
+		if source_file_name:
+			template.source_file_name = source_file_name
+		if worksheet and getattr(worksheet, 'title', None):
+			template.sheet_name = worksheet.title
+		template.save(update_fields=['source_file_name', 'sheet_name'])
+
 	existing_fields = {field.key: field for field in template.fields.all()}
 
 	for index, header in enumerate(headers, start=1):
@@ -670,6 +789,11 @@ def upsert_template_from_headers(headers, worksheet, source_file_name):
 			source_hint='auto_detected_from_data_import',
 			is_required=False,
 		)
+
+	try:
+		refresh_postgres_flat_view(template)
+	except Exception:
+		pass
 
 	return template
 
@@ -735,6 +859,16 @@ def build_patient_payload(row):
 		if derived_age is not None:
 			payload['age'] = derived_age
 
+	demographie_data = payload.get('demographie_data') or {}
+	demographie_age = normalize_age_value(demographie_data.get('demographie_age_ans'))
+	if demographie_age is not None:
+		demographie_data['demographie_age_ans'] = demographie_age
+		payload['age'] = demographie_age
+	elif payload.get('age') is not None:
+		demographie_data['demographie_age_ans'] = payload['age']
+	if demographie_data:
+		payload['demographie_data'] = demographie_data
+
 	if payload.get('date_naissance'):
 		demographie_data = payload.get('demographie_data') or {}
 		if not demographie_data.get('demographie_date_naissance'):
@@ -772,10 +906,12 @@ def ensure_required_identity_fields(payload):
 	if not payload.get('id_patient') and identifier:
 		payload['id_patient'] = str(identifier)
 
-	if payload.get('nom') in [None]:
+	nom_value = payload.get('nom')
+	if nom_value is None or str(nom_value).strip() == '':
 		payload['nom'] = ''
 
-	if payload.get('prenom') in [None]:
+	prenom_value = payload.get('prenom')
+	if prenom_value is None or str(prenom_value).strip() == '':
 		payload['prenom'] = ''
 
 	if payload.get('sexe'):
@@ -856,7 +992,19 @@ def resolve_entry_user_label(user):
 	return str(getattr(user, 'id', 'system_import'))
 
 
-def ensure_incremental_identifiers(payload, auto_increment_state=None):
+def ensure_incremental_identifiers(payload, auto_increment_state=None, force_generated=False):
+	if force_generated:
+		payload['id_patient'] = generate_next_numeric_patient_id(auto_increment_state=auto_increment_state)
+		if auto_increment_state is not None:
+			auto_increment_state['id_enregistrement_source'] = auto_increment_state.get('id_enregistrement_source', 0) + 1
+			payload['id_enregistrement_source'] = f"{AUTO_INCREMENT_FIELD_PREFIX['id_enregistrement_source']}{auto_increment_state['id_enregistrement_source']:06d}"
+		else:
+			payload['id_enregistrement_source'] = generate_next_incremental_identifier(
+				'id_enregistrement_source',
+				AUTO_INCREMENT_FIELD_PREFIX['id_enregistrement_source'],
+			)
+		return payload
+
 	if not payload.get('id_patient'):
 		payload['id_patient'] = generate_next_numeric_patient_id(auto_increment_state=auto_increment_state)
 
@@ -1201,6 +1349,14 @@ class PatientDetailView(APIView):
 		return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class PatientBulkPurgeView(APIView):
+	permission_classes = [IsAdminOrChefService]
+
+	def delete(self, request):
+		deleted_count, _ = Patient.objects.all().delete()
+		return Response({'deleted_count': deleted_count}, status=status.HTTP_200_OK)
+
+
 class PatientImportExcelView(APIView):
 	permission_classes = [IsAdminOrChefService]
 	parser_classes = [MultiPartParser, FormParser]
@@ -1210,29 +1366,45 @@ class PatientImportExcelView(APIView):
 		if not excel_file:
 			return Response({'error': 'Fichier Excel requis'}, status=status.HTTP_400_BAD_REQUEST)
 
-		try:
-			workbook = load_workbook(excel_file, data_only=False)
-		except Exception as error:
-			return Response({'error': f'Impossible de lire le fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
-
-		worksheet = workbook[workbook.sheetnames[0]]
 		source_file_name = getattr(excel_file, 'name', '')
+		lower_name = str(source_file_name).lower()
+		worksheet = None
+		dataframe = None
 
-		if is_schema_template_sheet(worksheet):
-			template, fields_created = parse_schema_from_template_sheet(worksheet, source_file_name)
-			template_data = PatientFormTemplateSerializer(template).data
-			return Response(
-				{
-					'mode': 'schema',
-					'template': template_data,
-					'fields_created': fields_created,
-					'patients_created': 0,
-					'errors': [],
-				},
-				status=status.HTTP_201_CREATED,
-			)
+		if lower_name.endswith('.xls'):
+			try:
+				excel_file.seek(0)
+				dataframe = pd.read_excel(excel_file, engine='xlrd')
+			except Exception as error:
+				return Response({'error': f'Impossible de lire le fichier Excel (.xls): {error}'}, status=status.HTTP_400_BAD_REQUEST)
+		else:
+			try:
+				excel_file.seek(0)
+				workbook = load_workbook(excel_file, data_only=False)
+			except Exception as error:
+				return Response({'error': f'Impossible de lire le fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
 
-		dataframe = pd.read_excel(excel_file)
+			worksheet = workbook[workbook.sheetnames[0]]
+
+			if is_schema_template_sheet(worksheet):
+				template, fields_created = parse_schema_from_template_sheet(worksheet, source_file_name)
+				template_data = PatientFormTemplateSerializer(template).data
+				return Response(
+					{
+						'mode': 'schema',
+						'template': template_data,
+						'fields_created': fields_created,
+						'patients_created': 0,
+						'errors': [],
+					},
+					status=status.HTTP_201_CREATED,
+				)
+
+			try:
+				excel_file.seek(0)
+				dataframe = pd.read_excel(excel_file)
+			except Exception as error:
+				return Response({'error': f'Impossible de lire les donnees du fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
 		headers = list(dataframe.columns)
 		template = upsert_template_from_headers(headers, worksheet, source_file_name)
 
@@ -1243,7 +1415,11 @@ class PatientImportExcelView(APIView):
 			payload = build_patient_payload(row)
 			payload = apply_automatic_schema_fields(payload, auto_increment_state=auto_increment_state, current_user=request.user)
 			payload = ensure_required_identity_fields(payload)
-			payload = ensure_incremental_identifiers(payload, auto_increment_state=auto_increment_state)
+			payload = ensure_incremental_identifiers(
+				payload,
+				auto_increment_state=auto_increment_state,
+				force_generated=True,
+			)
 			serializer = PatientSerializer(data=payload)
 			if serializer.is_valid():
 				serializer.save()
