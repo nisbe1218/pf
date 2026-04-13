@@ -212,6 +212,164 @@ const SECTION_FIELD_MAP = {
   devenir_: 'devenir_data',
 };
 
+const DEFAULT_PATIENT_COLUMN_KEYS = [
+  'id_patient',
+  'nom',
+  'prenom',
+  'id_enregistrement_source',
+  'id_site',
+  'statut_inclusion',
+  'statut_consentement',
+  'utilisateur_saisie',
+  'derniere_mise_a_jour',
+  'date_evaluation_initiale',
+  'demographie_sexe',
+  'demographie_date_naissance',
+  'demographie_age_ans',
+  'demographie_statut_matrimonial',
+  'demographie_mode_vie',
+  'demographie_zone_residence',
+  'demographie_distance_centre_km',
+  'demographie_couverture_sociale',
+  'demographie_statut_professionnel',
+  'demographie_niveau_education',
+  'demographie_tabagisme',
+  'demographie_alcool',
+  'irc_date_premier_contact_nephrologique',
+  'irc_etiologie_principale',
+  'irc_etiologie_secondaire',
+  'irc_maladie_renale_hereditaire',
+  'irc_antecedents_familiaux_renaux',
+  'irc_statut_biopsie_renale',
+  'irc_resultat_biopsie_renale',
+  'irc_connue_avant_dialyse',
+  'irc_source_adressage',
+  'irc_contexte_debut_dialyse',
+  'irc_duree_suivi_predialytique_mois',
+  'irc_themes_education_therapeutique',
+  'irc_niveau_comprehension_patient',
+  'irc_preference_therapie_renale',
+  'comorbidite_statut_diabete',
+  'comorbidite_liste',
+  'comorbidite_autre',
+  'comorbidite_exposition_toxique',
+  'comorbidite_antecedents_medicaments_nephrotoxiques',
+  'presentation_date_episode',
+  'presentation_lieu_debut',
+  'presentation_raisons_debut',
+  'presentation_symptomes',
+  'presentation_tas_mmhg',
+  'presentation_tad_mmhg',
+  'presentation_frequence_cardiaque_bpm',
+  'presentation_temperature_c',
+  'presentation_poids_kg',
+  'presentation_taille_cm',
+  'presentation_statut_diurese',
+  'presentation_volume_urinaire_ml_j',
+  'presentation_autonomie_fonctionnelle',
+  'presentation_notes_examen_clinique',
+  'biologie_date_prelevement',
+  'biologie_dfg_mdrd_ml_min_1_73m2',
+  'biologie_creatinine_mg_l',
+  'biologie_uree_g_l',
+  'biologie_hemoglobine_g_dl',
+  'biologie_hba1c_pct',
+  'biologie_leucocytes_g_l',
+  'biologie_plaquettes_g_l',
+  'biologie_albumine_g_l',
+  'biologie_crp_mg_l',
+  'biologie_sodium_mmol_l',
+  'biologie_potassium_mmol_l',
+  'biologie_bicarbonates_mmol_l',
+  'biologie_calcium_corrige_mg_l',
+  'biologie_phosphore_g_l',
+  'biologie_pth_pg_ml',
+  'biologie_ferritine_ng_ml',
+  'biologie_saturation_transferrine_pct',
+  'biologie_vitamine_d_ng_ml',
+  'biologie_proteinurie_g_24h',
+  'biologie_hbsag',
+  'biologie_vhc',
+  'biologie_vih',
+  'imagerie_date_echographie_renale',
+  'imagerie_taille_reins',
+  'imagerie_echogenicite_renale',
+  'imagerie_hydronephrose',
+  'imagerie_kystes_renaux',
+  'imagerie_lithiase',
+  'imagerie_radiographie_thorax',
+  'imagerie_date_echocardiographie',
+  'imagerie_fevg_pct',
+  'imagerie_hypertrophie_ventriculaire_gauche',
+  'imagerie_valvulopathie',
+  'imagerie_autres_resultats',
+  'dialyse_date_debut',
+  'dialyse_modalite_initiale',
+  'dialyse_modalite_actuelle',
+  'dialyse_type_acces_initial',
+  'dialyse_site_acces_initial',
+  'dialyse_date_creation_acces',
+  'dialyse_date_premiere_utilisation_acces',
+  'dialyse_jours_entre_catheter_et_fav',
+  'dialyse_acces_admission_tunnelise',
+  'dialyse_acces_admission_femoral',
+  'dialyse_acces_admission_fav',
+  'dialyse_acces_admission_peritoneale',
+  'dialyse_seances_par_semaine',
+  'dialyse_duree_seance_min',
+  'dialyse_debit_sanguin_ml_min',
+  'dialyse_debit_dialysat_ml_min',
+  'dialyse_potassium_dialysat_mmol_l',
+  'dialyse_calcium_dialysat_mmol_l',
+  'dialyse_type_anticoagulation',
+  'dialyse_statut_fonction_renale_residuelle',
+  'dialyse_type_regime_dp',
+  'dialyse_nombre_echanges_dp_jour',
+  'dialyse_volume_stase_dp_ml',
+  'dialyse_information_transplantation_donnee',
+  'dialyse_statut_liste_attente_transplantation',
+  'transplantation_bilan_pretransplantation',
+  'immunologie_transfusion_immunisation',
+  'qualite_date_evaluation',
+  'qualite_spktv',
+  'qualite_urr_pct',
+  'qualite_prise_poids_interdialytique_kg',
+  'qualite_taux_ultrafiltration_ml_kg_h',
+  'qualite_tas_predialyse_mmhg',
+  'qualite_tas_postdialyse_mmhg',
+  'qualite_poids_sec_kg',
+  'qualite_seances_manquees_30j',
+  'qualite_seances_raccourcies_30j',
+  'qualite_hypotensions_intradialytiques_30j',
+  'qualite_observance_declaree_patient',
+  'education_connaissance_pratique_dialyse',
+  'education_soins_acces_vasculaire',
+  'education_surveillance_poids_fluides',
+  'education_dietetique',
+  'education_traitements_associes',
+  'education_complications',
+  'traitement_medicaments_renaux_actuels',
+  'traitement_autres_notes',
+  'complication_debut_periode_suivi',
+  'complication_fin_periode_suivi',
+  'complication_liste',
+  'complication_date_premier_evenement',
+  'complication_nombre_hospitalisations',
+  'complication_jours_hospitalisation',
+  'complication_motifs_hospitalisation',
+  'complication_changement_modalite_dialyse',
+  'complication_autres_notes',
+  'devenir_date_dernier_suivi',
+  'devenir_statut',
+  'devenir_date_deces',
+  'devenir_cause_deces',
+  'devenir_delai_deces_jours',
+  'devenir_date_transplantation',
+  'devenir_qualite_vie',
+  'devenir_categorie_pronostique',
+  'devenir_notes',
+];
+
 const SIMILAR_SCHEMA_FALLBACK_MAP = {
   demographie_sexe: 'sexe',
   demographie_age_ans: 'age',
@@ -270,7 +428,7 @@ const extractApiMessage = (requestError, fallbackMessage) => {
     if (status === 401 || status === 403) {
       return 'Accès refusé à l’API patients pour ce compte.';
     }
-    return fallbackMessage;
+    return data;
   }
 
   const message = data?.error
@@ -345,15 +503,32 @@ function PatientsManagement() {
   const [purging, setPurging] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [insertValidationStatus, setInsertValidationStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem('patients_insert_validation_status');
+      return saved ? JSON.parse(saved) : { status: 'idle', approvedBy: null, requestedBy: null, timestamp: null, pendingIds: [] };
+    } catch {
+      return { status: 'idle', approvedBy: null, requestedBy: null, timestamp: null, pendingIds: [] };
+    }
+  });
   const [showAllDynamicColumns, setShowAllDynamicColumns] = useState(false);
-  const [showAllRows, setShowAllRows] = useState(false);
+  const [showAllRows, setShowAllRows] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedPatientIds, setSelectedPatientIds] = useState([]);
   const [deletingSelection, setDeletingSelection] = useState(false);
+  const [rejectingInsertion, setRejectingInsertion] = useState(false);
   const [mainSection, setMainSection] = useState('data_patient');
   const [activeTab, setActiveTab] = useState('gestion');
   const [analysisView, setAnalysisView] = useState('synthese');
   const [profile3dAngle, setProfile3dAngle] = useState(35);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('patients_insert_validation_status', JSON.stringify(insertValidationStatus));
+    } catch {
+      // ignore storage errors
+    }
+  }, [insertValidationStatus]);
 
   useEffect(() => {
     if (location.pathname.startsWith('/modele-ai')) {
@@ -363,8 +538,15 @@ function PatientsManagement() {
     setMainSection('data_patient');
   }, [location.pathname]);
 
+  const isValidationPending = insertValidationStatus.status === 'pending';
+  const isValidationValidated = insertValidationStatus.status === 'validated';
+  const canValidateInsertion = ['chef_service', 'super_admin'].includes(user?.role);
+  const formattedValidationTimestamp = insertValidationStatus.timestamp
+    ? new Date(insertValidationStatus.timestamp).toLocaleString('fr-FR')
+    : null;
+
   useEffect(() => {
-    const validIdSet = new Set(patients.map((patient) => patient.id));
+    const validIdSet = new Set(patients.map((patient) => getPatientUniqueId(patient)));
     setSelectedPatientIds((current) => current.filter((id) => validIdSet.has(id)));
   }, [patients]);
 
@@ -404,18 +586,32 @@ function PatientsManagement() {
     return patients.slice(0, INITIAL_ROWS_LIMIT);
   }, [patients, showAllRows]);
 
-  const selectedVisibleCount = useMemo(() => {
-    const visibleIdSet = new Set(visiblePatients.map((patient) => patient.id));
-    return selectedPatientIds.filter((id) => visibleIdSet.has(id)).length;
-  }, [selectedPatientIds, visiblePatients]);
+  const getPatientUniqueId = (patient) => {
+    return patient?.id ?? patient?.id_patient ?? patient?.id_enregistrement_source ?? '';
+  };
 
-  const allVisibleSelected = visiblePatients.length > 0 && selectedVisibleCount === visiblePatients.length;
+  const flattenPatientRow = (patient) => {
+    const flat = { ...patient };
+    if (patient?.extra_data && typeof patient.extra_data === 'object') {
+      Object.entries(patient.extra_data).forEach(([key, value]) => {
+        if (key !== 'id' && key !== 'id_patient') {
+          flat[key] = value;
+        }
+      });
+    }
 
-  const selectedPatientsCountLabel = selectedPatientIds.length > 1
-    ? `${selectedPatientIds.length} lignes selectionnees`
-    : selectedPatientIds.length === 1
-      ? '1 ligne selectionnee'
-      : 'Aucune ligne selectionnee';
+    Object.values(SECTION_FIELD_MAP).forEach((sectionField) => {
+      if (patient?.[sectionField] && typeof patient[sectionField] === 'object') {
+        Object.entries(patient[sectionField]).forEach(([key, value]) => {
+          if (key !== 'id' && key !== 'id_patient') {
+            flat[key] = value;
+          }
+        });
+      }
+    });
+
+    return flat;
+  };
 
   const tableSchemaFields = useMemo(() => {
     const fields = schemaTemplate?.fields || [];
@@ -431,6 +627,42 @@ function PatientsManagement() {
     const fixedKeys = new Set(FIXED_BASE_COLUMNS.map((column) => column.key));
     return tableSchemaFields.filter((field) => !fixedKeys.has(field.key));
   }, [tableSchemaFields]);
+
+  const patientColumnKeys = useMemo(() => {
+    const orderedKeys = Array.from(DEFAULT_PATIENT_COLUMN_KEYS);
+    const seenKeys = new Set(orderedKeys);
+
+    patients.forEach((patient) => {
+      Object.keys(patient).forEach((key) => {
+        if (key !== 'id' && !seenKeys.has(key)) {
+          seenKeys.add(key);
+          orderedKeys.push(key);
+        }
+      });
+    });
+
+    return orderedKeys;
+  }, [patients]);
+
+  const orderedSchemaFieldsForForm = useMemo(() => {
+    const schemaFieldMap = new Map(tableSchemaFields.map((field) => [field.key, field]));
+    return patientColumnKeys
+      .map((key) => schemaFieldMap.get(key))
+      .filter(Boolean);
+  }, [patientColumnKeys, tableSchemaFields]);
+
+  const selectedVisibleCount = useMemo(() => {
+    const visibleIdSet = new Set(visiblePatients.map((patient) => getPatientUniqueId(patient)));
+    return selectedPatientIds.filter((id) => visibleIdSet.has(id)).length;
+  }, [selectedPatientIds, visiblePatients]);
+
+  const allVisibleSelected = visiblePatients.length > 0 && selectedVisibleCount === visiblePatients.length;
+
+  const selectedPatientsCountLabel = selectedPatientIds.length > 1
+    ? `${selectedPatientIds.length} lignes selectionnees`
+    : selectedPatientIds.length === 1
+      ? '1 ligne selectionnee'
+      : 'Aucune ligne selectionnee';
 
   const getSectionFieldBySchemaKey = (schemaKey) => {
     const sectionPrefix = Object.keys(SECTION_FIELD_MAP).find((prefix) => schemaKey.startsWith(prefix));
@@ -494,6 +726,14 @@ function PatientsManagement() {
   };
 
   const resolveTableCellValue = (patient, schemaKey) => {
+    if (patient?.[schemaKey] !== undefined && patient?.[schemaKey] !== null && patient?.[schemaKey] !== '') {
+      const raw = patient[schemaKey];
+      if (schemaKey === 'sexe' || schemaKey === 'demographie_sexe') {
+        return normalizeSexDisplay(sexLabels[raw] || raw);
+      }
+      return formatBirthDateDisplay(patient, schemaKey, formatSchemaValue(schemaKey, raw));
+    }
+
     const mappedField = PATIENT_FIELD_MAP[schemaKey];
     if (mappedField) {
       const raw = patient?.[mappedField];
@@ -1075,24 +1315,42 @@ function PatientsManagement() {
   const loadPatients = async (activeFilters = filters) => {
     setLoading(true);
     setError('');
+
+    const flattenResponse = (data) => {
+      if (!Array.isArray(data)) {
+        return [];
+      }
+      return data.map(flattenPatientRow);
+    };
+
     try {
-      const response = await api.get('patients/', {
-        params: {
-          search: activeFilters.search || undefined,
-          id_patient: activeFilters.id_patient || undefined,
-          sexe: activeFilters.sexe || undefined,
-          age_min: activeFilters.age_min || undefined,
-          age_max: activeFilters.age_max || undefined,
-          date_naissance: activeFilters.date_naissance || undefined,
-          statut_inclusion: activeFilters.statut_inclusion || undefined,
-          infection: activeFilters.infection || undefined,
-          hemorrhage: activeFilters.hemorrhage || undefined,
-          avf_created: activeFilters.avf_created || undefined,
-        },
-      });
-      setPatients(response.data);
-    } catch (requestError) {
-      setError(extractApiMessage(requestError, 'Impossible de charger les données patients.'));
+      const response = await api.get('patients/flat/');
+      const rows = flattenResponse(response.data);
+      setPatients(rows);
+      return rows;
+    } catch (flatError) {
+      try {
+        const response = await api.get('patients/', {
+          params: {
+            search: activeFilters.search || undefined,
+            id_patient: activeFilters.id_patient || undefined,
+            sexe: activeFilters.sexe || undefined,
+            age_min: activeFilters.age_min || undefined,
+            age_max: activeFilters.age_max || undefined,
+            date_naissance: activeFilters.date_naissance || undefined,
+            statut_inclusion: activeFilters.statut_inclusion || undefined,
+            infection: activeFilters.infection || undefined,
+            hemorrhage: activeFilters.hemorrhage || undefined,
+            avf_created: activeFilters.avf_created || undefined,
+          },
+        });
+        const rows = flattenResponse(response.data);
+        setPatients(rows);
+        return rows;
+      } catch (requestError) {
+        setError(extractApiMessage(requestError, 'Impossible de charger les données patients.'));
+        return [];
+      }
     } finally {
       setLoading(false);
     }
@@ -1161,7 +1419,7 @@ function PatientsManagement() {
   };
 
   const toggleSelectAllVisible = (checked) => {
-    const visibleIds = visiblePatients.map((patient) => patient.id);
+    const visibleIds = visiblePatients.map((patient) => getPatientUniqueId(patient));
 
     if (checked) {
       setSelectedPatientIds((current) => Array.from(new Set([...current, ...visibleIds])));
@@ -1177,7 +1435,7 @@ function PatientsManagement() {
       return;
     }
 
-    const selectedPatient = patients.find((patient) => patient.id === selectedPatientIds[0]);
+    const selectedPatient = patients.find((patient) => getPatientUniqueId(patient) === selectedPatientIds[0]);
     if (!selectedPatient) {
       setError('La ligne selectionnee est introuvable. Rechargez la liste.');
       return;
@@ -1402,6 +1660,98 @@ function PatientsManagement() {
     }
   };
 
+  const handleValidateInsertion = async () => {
+    const roleName = user?.role === 'chef_service' ? 'Chef de service' : user?.role === 'super_admin' ? 'Administrateur' : 'Utilisateur';
+    const pendingIds = insertValidationStatus?.pendingIds || [];
+    if (!pendingIds.length) {
+      setError('Aucune insertion en attente à valider.');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+
+    try {
+      const validationTimestamp = new Date().toISOString();
+      await Promise.all(pendingIds.map((id) => {
+        const patient = patients.find((item) => item.id === id);
+        const extra_data = {
+          ...(patient?.extra_data || {}),
+          insertion_validation_status: 'validated',
+          insertion_validation_approved_by: roleName,
+          insertion_validation_timestamp: validationTimestamp,
+        };
+        return api.patch(`patients/${id}/`, { extra_data });
+      }));
+
+      const newStatus = {
+        status: 'validated',
+        approvedBy: roleName,
+        requestedBy: insertValidationStatus.requestedBy || roleName,
+        timestamp: validationTimestamp,
+        pendingIds: [],
+      };
+      setInsertValidationStatus(newStatus);
+      window.dispatchEvent(new Event('patientsInsertValidationUpdated'));
+      setSuccess(`Insertion validée par ${roleName}. Les patients ont conservé leur statut d'inclusion d'origine.`);
+      await loadPatients();
+    } catch (requestError) {
+      setError(extractApiMessage(requestError, 'Validation impossible.'));
+    }
+  };
+
+  const handleRejectInsertion = async () => {
+    const roleName = user?.role === 'chef_service' ? 'Chef de service' : user?.role === 'super_admin' ? 'Administrateur' : 'Utilisateur';
+    const pendingIds = insertValidationStatus?.pendingIds || [];
+    if (!pendingIds.length) {
+      setError('Aucune insertion en attente à refuser.');
+      return;
+    }
+
+    const confirmed = window.confirm('Refuser cette insertion supprimera les patients importés en attente. Continuer ?');
+    if (!confirmed) {
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setRejectingInsertion(true);
+
+    try {
+      const deletionResults = await Promise.allSettled(
+        pendingIds.map((id) => api.delete(`patients/${id}/`)),
+      );
+
+      const deletedIds = pendingIds.filter((_, index) => deletionResults[index].status === 'fulfilled');
+      const failedCount = deletionResults.length - deletedIds.length;
+      if (!deletedIds.length) {
+        setError('Aucune suppression n’a pu être effectuée. L’insertion n’a pas été refusée.');
+        return;
+      }
+
+      const rejectionTimestamp = new Date().toISOString();
+      const newStatus = {
+        status: 'rejected',
+        approvedBy: roleName,
+        requestedBy: insertValidationStatus.requestedBy || roleName,
+        timestamp: rejectionTimestamp,
+        pendingIds: [],
+      };
+      setInsertValidationStatus(newStatus);
+      window.dispatchEvent(new Event('patientsInsertValidationUpdated'));
+      setSuccess(
+        failedCount === 0
+          ? `Insertion refusée par ${roleName}. ${deletedIds.length} patient(s) importé(s) supprimé(s).`
+          : `Insertion partiellement refusée par ${roleName}. ${deletedIds.length} patient(s) supprimé(s), ${failedCount} échec(s).`,
+      );
+      await loadPatients();
+    } catch (requestError) {
+      setError(extractApiMessage(requestError, 'Refus impossible.'));
+    } finally {
+      setRejectingInsertion(false);
+    }
+  };
+
   const handleExportExcel = () => {
     setError('');
     try {
@@ -1456,11 +1806,7 @@ function PatientsManagement() {
 
       let response;
       try {
-        response = await api.post('patients/import/', buildFormData(), {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+        response = await api.post('patients/import/', buildFormData());
       } catch (primaryError) {
         const isRouteIssue = primaryError?.response?.status === 404;
         if (!isRouteIssue) {
@@ -1468,11 +1814,7 @@ function PatientsManagement() {
         }
 
         // Backward compatibility with older backend route naming.
-        response = await api.post('patients/import-excel/', buildFormData(), {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        });
+        response = await api.post('patients/import-excel/', buildFormData());
       }
 
       const importedFields = response.data?.fields_created || 0;
@@ -1489,11 +1831,39 @@ function PatientsManagement() {
         setError(`Import partiel: ${response.data.errors.length} ligne(s) rejetée(s).`);
       }
 
-      await loadSchema();
-      await loadPatients();
+      const existingPatientIds = new Set(patients.map((patient) => patient.id));
+      if (patientsCreated > 0) {
+        await loadSchema();
+        const loadedPatients = await loadPatients();
+        const newImportedIds = Array.from(new Set((loadedPatients || []).map((patient) => patient.id))).filter((id) => !existingPatientIds.has(id));
+        const requesterRoleName = user?.role === 'chef_service' ? 'Chef de service' : user?.role === 'super_admin' ? 'Administrateur' : 'Utilisateur';
+        const validationTimestamp = new Date().toISOString();
+        await Promise.allSettled(newImportedIds.map((id) => {
+          const extra_data = {
+            insertion_validation_status: 'pending',
+            insertion_validation_requested_by: requesterRoleName,
+            insertion_validation_timestamp: validationTimestamp,
+          };
+          return api.patch(`patients/${id}/`, { extra_data });
+        }));
+        const newStatus = {
+          status: 'pending',
+          approvedBy: null,
+          requestedBy: requesterRoleName,
+          timestamp: validationTimestamp,
+          pendingIds: newImportedIds,
+        };
+        setInsertValidationStatus(newStatus);
+        window.dispatchEvent(new Event('patientsInsertValidationUpdated'));
+      } else {
+        await loadSchema();
+        await loadPatients();
+      }
     } catch (requestError) {
       const apiMessage = extractApiMessage(requestError, 'Import de la structure Excel impossible.');
-      setError(`Import de la structure Excel impossible. ${apiMessage}`);
+      setError(apiMessage === 'Import de la structure Excel impossible.'
+        ? apiMessage
+        : `Import de la structure Excel impossible. ${apiMessage}`);
     } finally {
       setImporting(false);
       event.target.value = '';
@@ -1603,8 +1973,22 @@ function PatientsManagement() {
           </CardContent>
         </Card>
 
+        {insertValidationStatus.status === 'pending' && canValidateInsertion && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Nouvelle importation en attente de validation. {user?.role === 'chef_service' ? 'Vous, en tant que chef de service,' : 'Vous, en tant qu’administrateur,'} pouvez valider l'insertion pour rendre les données disponibles sur toute la plateforme.
+          </Alert>
+        )}
         {error && <Alert severity="error">{error}</Alert>}
         {success && <Alert severity="success">{success}</Alert>}
+        {insertValidationStatus.status === 'pending' && (
+          <Alert severity="warning">Les données importées sont en attente de validation. Un administrateur ou un chef de service doit valider l'insertion pour qu'elles soient visibles sur toute la plateforme.</Alert>
+        )}
+        {insertValidationStatus.status === 'validated' && (
+          <Alert severity="success">Insertion validée par {insertValidationStatus.approvedBy} le {formattedValidationTimestamp}.</Alert>
+        )}
+        {insertValidationStatus.status === 'rejected' && (
+          <Alert severity="error">Insertion refusée par {insertValidationStatus.approvedBy} le {formattedValidationTimestamp}.</Alert>
+        )}
 
         {activeTab === 'gestion' ? (
         <Grid container spacing={3}>
@@ -1641,7 +2025,7 @@ function PatientsManagement() {
                       <Typography variant="subtitle2" fontWeight={800}>
                         Reponses du modele interne
                       </Typography>
-                      {tableSchemaFields.map((field) => {
+                      {orderedSchemaFieldsForForm.map((field) => {
                         const value = schemaAnswers[field.key];
 
                         if (field.field_type === 'auto') {
@@ -1918,6 +2302,61 @@ function PatientsManagement() {
                         />
                       </Stack>
 
+                      {(isValidationPending || isValidationValidated) && (
+                        <Box
+                          sx={{
+                            mt: 2,
+                            p: 2,
+                            borderRadius: 2,
+                            border: '1px solid rgba(94, 115, 141, 0.18)',
+                            backgroundColor: 'rgba(245, 247, 250, 0.95)',
+                          }}
+                        >
+                          <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 1 }}>
+                            Statut d'insertion des données
+                          </Typography>
+                          {isValidationPending && (
+                            <Stack spacing={1}>
+                              <Typography variant="body2" color="text.secondary">
+                                Les données importées sont en attente de validation depuis {insertValidationStatus.requestedBy || 'un utilisateur'} le {formattedValidationTimestamp}.
+                              </Typography>
+                              {canValidateInsertion ? (
+                                <Stack direction="row" spacing={1} flexWrap="wrap">
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    onClick={handleValidateInsertion}
+                                    disabled={!isValidationPending || rejectingInsertion}
+                                    sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700, alignSelf: 'flex-start' }}
+                                  >
+                                    Valider l'insertion
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="error"
+                                    onClick={handleRejectInsertion}
+                                    disabled={!isValidationPending || rejectingInsertion}
+                                    sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700, alignSelf: 'flex-start' }}
+                                  >
+                                    Refuser l'insertion
+                                  </Button>
+                                </Stack>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                  Un chef de service ou un administrateur doit valider l'insertion pour que les données soient prises en compte.
+                                </Typography>
+                              )}
+                            </Stack>
+                          )}
+                          {isValidationValidated && (
+                            <Typography variant="body2" color="text.secondary">
+                              Insertion validée par {insertValidationStatus.approvedBy} le {formattedValidationTimestamp}. Les données peuvent maintenant être utilisées par toute la plateforme.
+                            </Typography>
+                          )}
+                        </Box>
+                      )}
+
                       <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center">
                         {extraColumns.length > INITIAL_DYNAMIC_COLUMNS_LIMIT && (
                           <Button
@@ -2009,25 +2448,15 @@ function PatientsManagement() {
                               inputProps={{ 'aria-label': 'Selectionner toutes les lignes visibles' }}
                             />
                           </TableCell>
-                          {fixedBaseColumns.map((column) => (
-                            <TableCell key={`fixed-head-${column.key}`} sx={{ fontWeight: 800 }}>{column.label}</TableCell>
-                          ))}
-                          {tableDisplaySchemaFields.length ? tableDisplaySchemaFields.map((field) => (
-                            <TableCell key={field.id} sx={{ fontWeight: 800 }}>{field.label}</TableCell>
-                          )) : (
-                            <TableCell sx={{ fontWeight: 800 }}>Aucune structure importée</TableCell>
-                          )}
-                          {visibleExtraColumns.map((columnKey) => (
-                            <TableCell key={`extra-head-${columnKey}`} sx={{ fontWeight: 800 }}>
-                              {columnKey}
-                            </TableCell>
+                          {patientColumnKeys.map((columnKey) => (
+                            <TableCell key={`flat-head-${columnKey}`} sx={{ fontWeight: 800 }}>{columnKey}</TableCell>
                           ))}
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {visiblePatients.map((patient) => (
                           <TableRow
-                            key={patient.id}
+                            key={getPatientUniqueId(patient)}
                             hover
                             onDoubleClick={() => beginEdit(patient)}
                             sx={{ cursor: 'pointer' }}
@@ -2035,33 +2464,21 @@ function PatientsManagement() {
                             <TableCell padding="checkbox">
                               <Checkbox
                                 size="small"
-                                checked={selectedPatientIds.includes(patient.id)}
-                                onChange={() => togglePatientSelection(patient.id)}
-                                inputProps={{ 'aria-label': `Selectionner la ligne du patient ${patient.id}` }}
+                                checked={selectedPatientIds.includes(getPatientUniqueId(patient))}
+                                onChange={() => togglePatientSelection(getPatientUniqueId(patient))}
+                                inputProps={{ 'aria-label': `Selectionner la ligne du patient ${getPatientUniqueId(patient)}` }}
                               />
                             </TableCell>
-                            {fixedBaseColumns.map((column) => (
-                              <TableCell key={`${patient.id}-fixed-${column.key}`}>
-                                {renderValue(resolveTableCellValue(patient, column.key), column.key, patient)}
-                              </TableCell>
-                            ))}
-                            {tableDisplaySchemaFields.length ? tableDisplaySchemaFields.map((field) => (
-                              <TableCell key={`${patient.id}-${field.id}`}>
-                                {renderValue(resolveTableCellValue(patient, field.key), field.key)}
-                              </TableCell>
-                            )) : (
-                              <TableCell>Importez le modèle Excel (Classeur1) pour générer les colonnes.</TableCell>
-                            )}
-                            {visibleExtraColumns.map((columnKey) => (
-                              <TableCell key={`${patient.id}-extra-${columnKey}`}>
-                                {renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]), columnKey)}
+                            {patientColumnKeys.map((columnKey) => (
+                              <TableCell key={`${getPatientUniqueId(patient)}-${columnKey}`}>
+                                {renderValue(patient[columnKey], columnKey, patient)}
                               </TableCell>
                             ))}
                           </TableRow>
                         ))}
                         {!patients.length && (
                           <TableRow>
-                            <TableCell colSpan={Math.max(2, fixedBaseColumns.length + tableDisplaySchemaFields.length + visibleExtraColumns.length + 1)} align="center">
+                            <TableCell colSpan={Math.max(2, patientColumnKeys.length + 1)} align="center">
                               Aucun patient trouvé.
                             </TableCell>
                           </TableRow>

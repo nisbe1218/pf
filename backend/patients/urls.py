@@ -6,6 +6,7 @@ from .views import (
     PatientExportExcelView,
     PatientImportExcelView,
     PatientListCreateView,
+    PatientPlateformeFlatView,
     PatientSchemaView,
 )
 
@@ -16,5 +17,6 @@ urlpatterns = [
     path('import/', PatientImportExcelView.as_view(), name='patient_import_excel'),
     path('import-excel/', PatientImportExcelView.as_view(), name='patient_import_excel_legacy'),
     path('export/', PatientExportExcelView.as_view(), name='patient_export_excel'),
+    path('flat/', PatientPlateformeFlatView.as_view(), name='patient_flat_list'),
     path('schema/', PatientSchemaView.as_view(), name='patient_schema'),
 ]

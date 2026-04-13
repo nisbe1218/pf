@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Card,
@@ -9,16 +10,19 @@ import {
   Chip,
   Divider,
   Grid,
+  IconButton,
   InputAdornment,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
   MenuItem,
   Paper,
+  Popover,
   Stack,
   SvgIcon,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import api from '../../services/api/axios';
@@ -28,6 +32,7 @@ import AppSidebar from '../../components/common/AppSidebar';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
+import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const roleLabels = {
@@ -368,27 +373,29 @@ function Dashboard() {
           }}
         />
         <Stack spacing={1.25} sx={{ position: 'relative' }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
             <Chip
               label={roleLabels[user?.role] || 'Utilisateur'}
               sx={{ alignSelf: 'flex-start', bgcolor: 'rgba(255,255,255,0.18)', color: 'white' }}
             />
-            <Button
-              onClick={handleLogout}
-              variant="outlined"
-              startIcon={<LogoutOutlinedIcon />}
-              sx={{
-                color: 'white',
-                borderColor: 'rgba(255,255,255,0.35)',
-                alignSelf: 'flex-start',
-                '&:hover': {
-                  borderColor: 'rgba(255,255,255,0.75)',
-                  backgroundColor: 'rgba(255,255,255,0.08)',
-                },
-              }}
-            >
-              Déconnexion
-            </Button>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button
+                onClick={handleLogout}
+                variant="outlined"
+                startIcon={<LogoutOutlinedIcon />}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.35)',
+                  alignSelf: 'flex-start',
+                  '&:hover': {
+                    borderColor: 'rgba(255,255,255,0.75)',
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                  },
+                }}
+              >
+                Déconnexion
+              </Button>
+            </Stack>
           </Stack>
           <Typography variant="h4" fontWeight={900}>
             Tableau de bord RBAC

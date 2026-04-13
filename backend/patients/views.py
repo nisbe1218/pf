@@ -592,14 +592,10 @@ def derive_date_of_birth_from_age(age_value):
 	if normalized_age is None:
 		return None
 
-	today = timezone.localdate()
-	try:
-		birth_date = today.replace(year=today.year - normalized_age)
-	except ValueError:
-		# Handles Feb 29 edge case on non-leap years.
-		birth_date = today.replace(month=2, day=28, year=today.year - normalized_age)
-
-	return birth_date.isoformat()
+	# Age only provides a year estimate, not an exact birth date.
+	# Avoid creating a misleading full date with today’s month/day.
+	target_year = timezone.localdate().year - normalized_age
+	return f"{target_year}-01-01"
 
 
 def normalize_sex_values(value):
@@ -626,6 +622,13 @@ def _is_truthy(value):
 	return normalized in ['1', 'true', 'yes', 'oui', 'y']
 
 
+def _is_falsey(value):
+	if isinstance(value, bool):
+		return not value
+	normalized = normalize_header(value)
+	return normalized in ['0', 'false', 'no', 'non', 'aucun', 'none', 'null', 'na', 'n_a', '']
+
+
 def normalize_section_value(section_key, value, source_key=None):
 	if value is None:
 		return value
@@ -639,6 +642,14 @@ def normalize_section_value(section_key, value, source_key=None):
 	if section_key == 'demographie_date_naissance':
 		parsed_value = parse_flexible_date(value)
 		return parsed_value or value
+
+	if 'date' in section_key:
+		parsed_value = parse_flexible_date(value)
+		if parsed_value:
+			return parsed_value
+		if _is_falsey(value):
+			return None
+		return value
 
 	if section_key == 'demographie_couverture_sociale' and source_key == 'social_coverage':
 		return SOCIAL_COVERAGE_CODE_MAP.get(normalized_value, value)
@@ -853,6 +864,7 @@ def build_patient_payload(row):
 		derived_birth_date = derive_date_of_birth_from_age(payload.get('age'))
 		if derived_birth_date:
 			payload['date_naissance'] = derived_birth_date
+			payload['_date_naissance_estimee'] = True
 
 	if payload.get('date_naissance') and 'age' not in payload:
 		derived_age = derive_age_from_date_of_birth(payload.get('date_naissance'))
@@ -872,8 +884,12 @@ def build_patient_payload(row):
 	if payload.get('date_naissance'):
 		demographie_data = payload.get('demographie_data') or {}
 		if not demographie_data.get('demographie_date_naissance'):
-			demographie_data['demographie_date_naissance'] = payload['date_naissance']
+			if payload.get('_date_naissance_estimee'):
+				demographie_data['demographie_date_naissance'] = str(payload['date_naissance'])[:4]
+			else:
+				demographie_data['demographie_date_naissance'] = payload['date_naissance']
 		payload['demographie_data'] = demographie_data
+		payload.pop('_date_naissance_estimee', None)
 
 	if 'date_admission' in payload:
 		parsed_date = parse_flexible_date(payload.get('date_admission'))
@@ -1344,6 +1360,13 @@ class PatientDetailView(APIView):
 			return Response(serializer.data)
 		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+	def patch(self, request, pk):
+		serializer = PatientSerializer(self.get_object(pk), data=request.data, partial=True)
+		if serializer.is_valid():
+			serializer.save()
+			return Response(serializer.data)
+		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 	def delete(self, request, pk):
 		self.get_object(pk).delete()
 		return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1460,3 +1483,24 @@ class PatientSchemaView(APIView):
 		if not template:
 			return Response({'template': None})
 		return Response({'template': PatientFormTemplateSerializer(template).data})
+
+
+class PatientPlateformeFlatView(APIView):
+	permission_classes = [IsAdminOrChefService]
+
+	def get(self, request):
+		limit = request.query_params.get('limit')
+		try:
+			limit = int(limit) if limit is not None else None
+		except ValueError:
+			limit = None
+
+		with connection.cursor() as cursor:
+			if limit is None:
+				cursor.execute('SELECT * FROM patients_plateforme_flat')
+			else:
+				cursor.execute('SELECT * FROM patients_plateforme_flat LIMIT %s', [limit])
+			columns = [col[0] for col in cursor.description]
+			rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+		return Response(rows)

@@ -5,6 +5,7 @@ import Dashboard from './pages/dashboard/Dashboard';
 import Login from './pages/auth/Login';
 import Unauthorized from './pages/unauthorized/Unauthorized';
 import PatientsManagement from './pages/patients/PatientsManagement';
+import ModelAI from './pages/model-ai/ModelAI';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 
@@ -21,7 +22,7 @@ function App() {
             {/* Routes Protégées (Tous les rôles connectés) */}
             <Route element={<ProtectedRoute />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/modele-ai" element={<PatientsManagement />} />
+              <Route path="/modele-ai" element={<ModelAI />} />
             </Route>
 
             <Route element={<ProtectedRoute allowedRoles={['super_admin', 'chef_service']} />}>
