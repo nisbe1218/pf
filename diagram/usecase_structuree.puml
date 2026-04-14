@@ -1,0 +1,128 @@
+@startuml
+' Use case structure selon les roles et les fonctionnalites demandees
+top to bottom direction
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam linetype ortho
+skinparam ranksep 35
+skinparam nodesep 25
+
+skinparam usecase {
+  BackgroundColor #FFFFFF
+  BorderColor #374151
+  FontColor #111827
+}
+
+skinparam package {
+  BorderColor #9CA3AF
+  FontColor #111827
+}
+
+skinparam actor {
+  FontColor #111827
+}
+
+' ===== ACTEURS =====
+actor "Utilisateur" as U #E5E7EB
+actor "Super Administrateur\n(Admin)" as SA #FBCFE8
+actor "Chef de Service" as CS #BFDBFE
+actor "Professeur" as PR #BBF7D0
+actor "Résident" as RS #FDE68A
+
+SA --|> U
+CS --|> U
+PR --|> U
+RS --|> U
+
+' Aide au placement vertical
+U -[hidden]down-> SA
+SA -[hidden]down-> CS
+CS -[hidden]down-> PR
+PR -[hidden]down-> RS
+
+' ===== ADMINISTRATION & ACCES =====
+rectangle "Administration & accès" as ADM #FCE7F3 {
+  usecase "S'authentifier" as UC1
+  usecase "Gérer les utilisateurs" as UC2
+  usecase "Consulter le journal de traçabilité" as UC3
+  usecase "Superviser la sécurité et les accès" as UC4
+}
+
+' ===== DONNEES MEDICALES =====
+rectangle "Gestion des données" as DATA #DBEAFE {
+  usecase "Importer les données médicales via Excel" as UC5
+  usecase "Nettoyer les données" as UC6
+  usecase "Valider les données" as UC7
+  usecase "Stocker les données" as UC8
+  usecase "Superviser la qualité des données" as UC9
+
+  UC5 --> UC6 : <<include>>
+  UC6 --> UC7 : <<include>>
+  UC7 --> UC8 : <<include>>
+}
+
+' ===== DOSSIERS PATIENTS =====
+rectangle "Dossiers patients" as PAT #FEF3C7 {
+  usecase "Consulter les dossiers patients" as UC10
+  usecase "Suivre les patients" as UC11
+}
+
+' ===== ANALYSE & IA =====
+rectangle "Analyse & IA" as AI #DCFCE7 {
+  usecase "Faire des prédictions via modèles IA" as UC12
+  usecase "Analyser les modèles prédictifs" as UC13
+  usecase "Comparer les modèles prédictifs" as UC14
+  usecase "Visualiser les statistiques" as UC15
+}
+
+' Aide au placement vertical des blocs
+UC1 -[hidden]down-> UC5
+UC5 -[hidden]down-> UC10
+UC10 -[hidden]down-> UC12
+
+' ===== RELATIONS =====
+' Super Administrateur
+SA --> UC1
+SA --> UC2
+SA --> UC3
+SA --> UC4
+SA --> UC10
+SA --> UC15
+
+' Chef de Service
+CS --> UC1
+CS --> UC2
+CS --> UC3
+CS --> UC4
+CS --> UC5
+CS --> UC6
+CS --> UC7
+CS --> UC8
+CS --> UC9
+CS --> UC10
+CS --> UC11
+CS --> UC12
+CS --> UC13
+CS --> UC14
+CS --> UC15
+
+' Professeur
+PR --> UC1
+PR --> UC10
+PR --> UC11
+PR --> UC12
+PR --> UC13
+PR --> UC14
+PR --> UC15
+
+' Résident
+RS --> UC1
+RS --> UC10
+RS --> UC11
+RS --> UC12
+RS --> UC13
+RS --> UC14
+RS --> UC15
+
+@enduml

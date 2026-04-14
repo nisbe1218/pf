@@ -1,0 +1,188 @@
+@startuml
+' Diagramme entite-association structure selon les roles et les fonctionnalites
+top to bottom direction
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam ranksep 40
+skinparam nodesep 25
+!define RECTANGLE class
+
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #64748B
+  ArrowColor #64748B
+  FontColor #0F172A
+}
+
+skinparam package {
+  BorderColor #CBD5E1
+  FontColor #0F172A
+  BackgroundColor #F8FAFC
+}
+
+' ===== SECURITE & ACCES =====
+package "Sécurité & Accès" #FCE7F3 {
+  RECTANGLE Utilisateur {
+    +id_utilisateur : int
+    +nom : string
+    +prenom : string
+    +email : string
+    +mot_de_passe : string
+    +role : enum(admin, chef_service, professeur, resident)
+  }
+
+  RECTANGLE JournalTraçabilité {
+    +id_journal : int
+    +action : string
+    +cible : string
+    +date_action : datetime
+    +details : string
+    +utilisateur_id : int
+  }
+}
+
+' ===== GESTION DES DONNEES =====
+package "Gestion des données" #DBEAFE {
+  RECTANGLE ImportDonneesExcel {
+    +id_import : int
+    +fichier_excel : string
+    +date_import : datetime
+    +etat_import : enum(en_attente, valide, rejete)
+    +utilisateur_id : int
+  }
+
+  RECTANGLE DonneeMedicale {
+    +id_donnee : int
+    +type_donnee : enum(biologique, clinique)
+    +valeur : float
+    +date_mesure : date
+    +patient_id : int
+  }
+
+  RECTANGLE ValidationDonnees {
+    +id_validation : int
+    +date_validation : datetime
+    +statut : enum(validee, rejetee)
+    +commentaire : string
+    +import_id : int
+    +utilisateur_id : int
+  }
+}
+
+' ===== PATIENTS =====
+package "Dossier Patient" #FEF3C7 {
+  RECTANGLE Patient {
+    +id_patient : int
+    +nom : string
+    +prenom : string
+    +date_naissance : date
+    +diagnostic_principal : string
+    +classification_clinique : enum(aigue, chronique)
+  }
+
+  RECTANGLE DossierPatient {
+    +id_dossier : int
+    +date_creation : date
+    +statut : enum(actif, archive)
+    +patient_id : int
+  }
+
+  RECTANGLE Consultation {
+    +id_consultation : int
+    +date_consultation : datetime
+    +notes : string
+    +patient_id : int
+    +utilisateur_id : int
+  }
+
+  RECTANGLE Diagnostic {
+    +id_diagnostic : int
+    +description : string
+    +date_diagnostic : date
+    +consultation_id : int
+  }
+
+  RECTANGLE Traitement {
+    +id_traitement : int
+    +description : string
+    +date_debut : date
+    +date_fin : date
+    +consultation_id : int
+  }
+}
+
+' ===== CLASSIFICATION CLINIQUE =====
+package "Classification clinique" #E0E7FF {
+  RECTANGLE MaladieAigue {
+    +id_maladie_aigue : int
+    +type : enum(ESRD, coagulation, insuffisance_aigue)
+    +gravite : enum(critique, intermediaire, stable)
+    +patient_id : int
+  }
+
+  RECTANGLE MaladieChronique {
+    +id_maladie_chronique : int
+    +diagnostic : string
+    +score_stabilite : enum(stable, instable, degradation)
+    +patient_id : int
+  }
+}
+
+' ===== ANALYSE & IA =====
+package "Analyse & IA" #DCFCE7 {
+  RECTANGLE ModeleML {
+    +id_modele : int
+    +nom : string
+    +type_modele : string
+    +version : string
+  }
+
+  RECTANGLE Prediction {
+    +id_prediction : int
+    +type_prediction : enum(coagulation, mortalite_1an, progression)
+    +score : float
+    +facteurs_influents : string
+    +date_prediction : datetime
+    +patient_id : int
+    +utilisateur_id : int
+    +modele_id : int
+  }
+
+  RECTANGLE Statistique {
+    +id_statistique : int
+    +type_analyse : string
+    +resultats : string
+    +date_analyse : datetime
+    +modele_id : int
+  }
+}
+
+' ===== RELATIONS =====
+Utilisateur "1" -- "0..*" JournalTraçabilité : consigne
+Utilisateur "1" -- "0..*" Consultation : réalise
+Utilisateur "1" -- "0..*" Prediction : produit
+
+ImportDonneesExcel "1" -- "0..*" ValidationDonnees : controle
+Patient "1" -- "1" DossierPatient : possède
+Patient "1" -- "0..*" Consultation : concerne
+Consultation "1" -- "0..*" Diagnostic : contient
+Consultation "1" -- "0..*" Traitement : contient
+Patient "1" -- "0..*" DonneeMedicale : possède
+Patient "1" -- "0..1" MaladieAigue : affiché en section aiguë
+Patient "1" -- "0..1" MaladieChronique : affiché en section chronique
+Patient "1" -- "0..*" Prediction : concerne
+Prediction "1" -- "1" ModeleML : utilise
+Prediction "0..*" -- "0..*" DonneeMedicale : exploite
+Statistique "0..*" -- "1" ModeleML : compare
+
+' Aide a l'agencement vertical
+Utilisateur -[hidden]down-> ImportDonneesExcel
+ImportDonneesExcel -[hidden]down-> Patient
+Patient -[hidden]down-> ModeleML
+ModeleML -[hidden]down-> JournalTraçabilité
+Patient -[hidden]down-> MaladieAigue
+MaladieAigue -[hidden]down-> MaladieChronique
+
+@enduml

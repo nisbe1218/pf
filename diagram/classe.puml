@@ -1,0 +1,260 @@
+@startuml
+top to bottom direction
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam backgroundColor white
+skinparam linetype ortho
+skinparam ranksep 40
+skinparam nodesep 25
+
+skinparam class {
+    BackgroundColor #FFFFFF
+    BorderColor #64748B
+    FontColor #0F172A
+    ArrowColor #64748B
+}
+
+skinparam package {
+    BorderColor #CBD5E1
+    FontColor #0F172A
+    BackgroundColor #F8FAFC
+}
+
+' ===== UTILISATEURS ET RÔLES =====
+package "Sécurité & Accès" #FCE7F3 {
+    abstract class Utilisateur {
+        - id : int
+        - nom : string
+        - prenom : string
+        - email : string
+        - motDePasse : string
+        + seConnecter() : bool
+        + consulterDroits() : void
+        + consulterJournalTraçabilité() : void
+    }
+
+    class JournalTraçabilité {
+        - id : int
+        - action : string
+        - cible : string
+        - dateAction : datetime
+        - details : string
+        + enregistrer() : void
+        + consulter() : void
+    }
+
+    class SuperAdministrateur {
+        + gererUtilisateurs() : void
+        + consulterJournal() : void
+        + consulterDossiersPatients() : void
+        + consulterStatistiques() : void
+    }
+
+    class ChefDeService {
+        + gererUtilisateurs() : void
+        + consulterJournal() : void
+        + importerDonneesExcel() : void
+        + nettoyerDonnees() : void
+        + validerDonnees() : void
+        + stockerDonnees() : void
+        + consulterDossiersPatients() : void
+        + suivrePatients() : void
+        + fairePredictions() : void
+        + comparerModeles() : void
+        + consulterStatistiques() : void
+    }
+
+    class Professeur {
+        + consulterDossiersPatients() : void
+        + suivrePatient() : void
+        + fairePredictions() : void
+        + comparerModeles() : void
+        + analyserStatistiques() : void
+    }
+
+    class Resident {
+        + consulterDossiersPatients() : void
+        + suivrePatient() : void
+        + fairePredictions() : void
+        + analyserStatistiques() : void
+    }
+}
+
+' ===== DOSSIER PATIENT =====
+package "Dossier Patient" #DBEAFE {
+    class Patient {
+        - id : int
+        - nom : string
+        - prenom : string
+        - dateNaissance : date
+        - diagnosticPrincipal : string
+        - classificationClinique : enum(aigue, chronique)
+        + classerPatient() : void
+        + getHistoriqueMedical() : List<Consultation>
+        + getParametresCliniques() : List<DonneeMedicale>
+    }
+
+    class DossierPatient {
+        - id : int
+        - dateCreation : date
+        - statut : enum(actif, archive)
+        + consulter() : void
+        + archiver() : void
+    }
+
+    class Consultation {
+        - id : int
+        - dateConsultation : datetime
+        - notes : string
+        + ajouterDiagnostic() : void
+        + ajouterTraitement() : void
+        + modifier() : void
+    }
+
+    class Diagnostic {
+        - id : int
+        - description : string
+        - dateDiagnostic : date
+    }
+
+    class Traitement {
+        - id : int
+        - description : string
+        - dateDebut : date
+        - dateFin : date
+    }
+
+    class DonneeMedicale {
+        - id : int
+        - type : enum(biologique, clinique)
+        - valeur : float
+        - dateMesure : date
+        + nettoyer() : void
+        + valider() : bool
+    }
+}
+
+' ===== GESTION DES DONNÉES =====
+package "Gestion des données" #E0E7FF {
+    class ImportDonneesExcel {
+        - id : int
+        - fichierExcel : string
+        - dateImport : datetime
+        - etatImport : enum(en_attente, valide, rejete)
+        + importer() : void
+        + controlerFormat() : bool
+    }
+
+    class ValidationDonnees {
+        - id : int
+        - dateValidation : datetime
+        - statut : enum(validee, rejetee)
+        - commentaire : string
+        + valider() : bool
+        + rejeter() : void
+    }
+
+    class GestionDonnees {
+        + importerExcel() : void
+        + nettoyerDonnees() : void
+        + validerDonnees() : void
+        + stockerDonnees() : void
+    }
+}
+
+' ===== CLASSIFICATION CLINIQUE =====
+package "Classification clinique" #FEF3C7 {
+    class MaladieAigue {
+        - id : int
+        - type : enum(ESRD, coagulation, insuffisance_aigue)
+        - gravite : enum(critique, intermediaire, stable)
+        + prioriser() : int
+    }
+
+    class MaladieChronique {
+        - id : int
+        - diagnostic : string
+        - scoreStabilite : enum(stable, instable, degradation)
+        + calculerScore() : string
+        + predireEvolution() : Prediction
+    }
+}
+
+' ===== IA ET ANALYSE =====
+package "Analyse & IA" #DCFCE7 {
+    class Prediction {
+        - id : int
+        - typePrediction : enum(coagulation, mortalite_1an, progression)
+        - score : float
+        - facteursInfluents : string
+        - datePrediction : datetime
+        + calculerScore() : float
+        + afficherResultat() : void
+    }
+
+    class ModeleML {
+        - id : int
+        - nom : string
+        - typeModele : string
+        - version : string
+        + executerPrediction() : Prediction
+        + comparer() : void
+    }
+
+    class Statistiques {
+        - id : int
+        - typeAnalyse : string
+        - resultats : string
+        - dateAnalyse : datetime
+        + visualiserGlobal() : void
+        + comparerModeles() : void
+        + analyserTendances() : void
+    }
+}
+
+' ===== HÉRITAGE =====
+Utilisateur <|-- SuperAdministrateur
+Utilisateur <|-- ChefDeService
+Utilisateur <|-- Professeur
+Utilisateur <|-- Resident
+
+' ===== RELATIONS =====
+Utilisateur "1" --> "0..*" JournalTraçabilité : consulte
+Utilisateur "1" --> "0..*" Consultation : effectue
+Utilisateur "1" --> "0..*" Prediction : produit
+Utilisateur "1" --> "0..*" Statistiques : consulte
+
+ChefDeService "1" --> "0..*" ImportDonneesExcel : réalise
+ChefDeService "1" --> "0..*" ValidationDonnees : valide
+ChefDeService "1" --> "0..*" GestionDonnees : gère
+
+Patient "1" --> "1" DossierPatient : possède
+Patient "1" --> "0..*" Consultation : concerne
+Consultation "1" --> "0..*" Diagnostic : contient
+Consultation "1" --> "0..*" Traitement : contient
+Consultation "1" --> "0..*" DonneeMedicale : enregistre
+Patient "1" --> "0..*" DonneeMedicale : possède
+
+Patient "1" --> "0..1" MaladieAigue : section aiguë
+Patient "1" --> "0..1" MaladieChronique : section chronique
+Patient "1" --> "0..*" Prediction : concerne
+
+Prediction "1" --> "1" ModeleML : utilise
+Prediction "0..*" --> "0..*" DonneeMedicale : exploite
+Statistiques "0..*" --> "1" ModeleML : compare
+Statistiques "0..*" --> "0..*" Prediction : synthétise
+
+GestionDonnees --> ImportDonneesExcel
+GestionDonnees --> ValidationDonnees
+GestionDonnees --> DonneeMedicale
+
+' Aide PlantUML à stabiliser l'agencement vertical
+Utilisateur -[hidden]down-> Patient
+Patient -[hidden]down-> MaladieAigue
+MaladieAigue -[hidden]down-> Prediction
+Prediction -[hidden]down-> JournalTraçabilité
+JournalTraçabilité -[hidden]down-> ImportDonneesExcel
+ImportDonneesExcel -[hidden]down-> ValidationDonnees
+
+@enduml

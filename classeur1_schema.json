@@ -1,0 +1,1298 @@
+{
+  "workbook": "Template_Patients_HD.xlsx",
+  "sheet": "Template",
+  "rows": 1,
+  "columns": 153,
+  "fields": [
+    {
+      "field_type": "généré automatiquement",
+      "key": "id_patient",
+      "possible_values": [],
+      "index": 1
+    },
+    {
+      "field_type": "texte libre court",
+      "key": "id_enregistrement_source",
+      "possible_values": [],
+      "index": 2
+    },
+    {
+      "field_type": "texte libre court",
+      "key": "id_site",
+      "possible_values": [],
+      "index": 3
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "statut_inclusion",
+      "possible_values": [
+        "depiste",
+        "inclus",
+        "en_suivi",
+        "termine",
+        "retire"
+      ],
+      "index": 4
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "statut_consentement",
+      "possible_values": [
+        "consenti",
+        "refuse",
+        "en_attente",
+        "non_applicable"
+      ],
+      "index": 5
+    },
+    {
+      "field_type": "généré automatiquement",
+      "key": "utilisateur_saisie",
+      "possible_values": [],
+      "index": 6
+    },
+    {
+      "field_type": "généré automatiquement",
+      "key": "derniere_mise_a_jour",
+      "possible_values": [],
+      "index": 7
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "date_evaluation_initiale",
+      "possible_values": [],
+      "index": 8
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_sexe",
+      "possible_values": [
+        "homme",
+        "femme",
+        "intersexe",
+        "inconnu"
+      ],
+      "index": 9
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "demographie_date_naissance",
+      "possible_values": [],
+      "index": 10
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "demographie_age_ans",
+      "possible_values": [],
+      "index": 11
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_statut_matrimonial",
+      "possible_values": [
+        "celibataire",
+        "marie",
+        "divorce",
+        "veuf",
+        "inconnu"
+      ],
+      "index": 12
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_mode_vie",
+      "possible_values": [
+        "seul",
+        "avec_famille",
+        "institutionnalise",
+        "sans_abri",
+        "inconnu"
+      ],
+      "index": 13
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_zone_residence",
+      "possible_values": [
+        "casablanca",
+        "rabat",
+        "sale",
+        "fes",
+        "meknes",
+        "marrakech",
+        "agadir",
+        "tanger",
+        "tetouan",
+        "oujda",
+        "kenitra",
+        "safi",
+        "el_jadida",
+        "nador",
+        "beni_mellal",
+        "taza",
+        "khouribga",
+        "settat",
+        "larache",
+        "ksar_el_kebir",
+        "guelmim",
+        "errachidia",
+        "ouarzazate",
+        "laayoune",
+        "dakhla",
+        "mohammedia",
+        "autre_ville_du_maroc",
+        "hors_maroc"
+      ],
+      "index": 14
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "demographie_distance_centre_km",
+      "possible_values": [],
+      "index": 15
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_couverture_sociale",
+      "possible_values": [
+        "auto_paiement",
+        "amo",
+        "assistance_publique",
+        "assurance_privee",
+        "assurance_militaire",
+        "autre",
+        "inconnu"
+      ],
+      "index": 16
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_statut_professionnel",
+      "possible_values": [
+        "employe",
+        "sans_emploi",
+        "retraite",
+        "etudiant",
+        "au_foyer",
+        "incapacite",
+        "inconnu"
+      ],
+      "index": 17
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_niveau_education",
+      "possible_values": [
+        "aucun",
+        "primaire",
+        "secondaire",
+        "lycee",
+        "universitaire",
+        "inconnu"
+      ],
+      "index": 18
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_tabagisme",
+      "possible_values": [
+        "jamais",
+        "ancien",
+        "actuel",
+        "inconnu"
+      ],
+      "index": 19
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_alcool",
+      "possible_values": [
+        "jamais",
+        "ancien",
+        "occasionnel",
+        "regulier",
+        "inconnu"
+      ],
+      "index": 20
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "irc_date_premier_contact_nephrologique",
+      "possible_values": [],
+      "index": 21
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_etiologie_principale",
+      "possible_values": [
+        "nephropathie_diabetique",
+        "nephroangiosclerose_hypertensive",
+        "glomerulonephrite_chronique",
+        "polykystose_renale",
+        "uropathie_obstructive",
+        "nephrite_lupique",
+        "vascularite",
+        "nephrite_interstitielle",
+        "amylose_ou_myelome",
+        "indeterminee",
+        "autre"
+      ],
+      "index": 22
+    },
+    {
+      "field_type": "texte libre",
+      "key": "irc_etiologie_secondaire",
+      "possible_values": [],
+      "index": 23
+    },
+    {
+      "field_type": "oui/non",
+      "key": "irc_maladie_renale_hereditaire",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 24
+    },
+    {
+      "field_type": "oui/non",
+      "key": "irc_antecedents_familiaux_renaux",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 25
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_statut_biopsie_renale",
+      "possible_values": [
+        "non_realisee",
+        "realisee_concluante",
+        "realisee_non_concluante",
+        "en_attente",
+        "inconnu"
+      ],
+      "index": 26
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "irc_resultat_biopsie_renale",
+      "possible_values": [],
+      "index": 27
+    },
+    {
+      "field_type": "oui/non",
+      "key": "irc_connue_avant_dialyse",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 28
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_source_adressage",
+      "possible_values": [
+        "nephrologue",
+        "medecine_interne",
+        "urgences",
+        "soins_primaires",
+        "autre_specialite",
+        "autre"
+      ],
+      "index": 29
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_contexte_debut_dialyse",
+      "possible_values": [
+        "debut_planifie",
+        "debut_en_urgence",
+        "debut_non_planifie_en_hospitalisation",
+        "transfert_entrant",
+        "inconnu"
+      ],
+      "index": 30
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "irc_duree_suivi_predialytique_mois",
+      "possible_values": [],
+      "index": 31
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "irc_themes_education_therapeutique",
+      "possible_values": [
+        "maladie_renale_chronique",
+        "hemodialyse",
+        "dialyse_peritoneale",
+        "transplantation",
+        "acces_vasculaire",
+        "soins_cathetere_peritoneal",
+        "regime_et_hydratation",
+        "medicaments",
+        "signes_complications"
+      ],
+      "index": 32
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_niveau_comprehension_patient",
+      "possible_values": [
+        "faible",
+        "partielle",
+        "bonne",
+        "excellente",
+        "inconnu"
+      ],
+      "index": 33
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "irc_preference_therapie_renale",
+      "possible_values": [
+        "hemodialyse",
+        "dialyse_peritoneale",
+        "transplantation",
+        "indecis",
+        "refus"
+      ],
+      "index": 34
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "comorbidite_statut_diabete",
+      "possible_values": [
+        "aucun",
+        "type_1",
+        "type_2",
+        "secondaire",
+        "inconnu"
+      ],
+      "index": 35
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "comorbidite_liste",
+      "possible_values": [
+        "hypertension_arterielle",
+        "cardiopathie",
+        "uropathie_obstructive",
+        "goutte",
+        "maladie_renale_hereditaire",
+        "exposition_toxique",
+        "antecedent_nephrotoxiques",
+        "autre"
+      ],
+      "index": 36
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "comorbidite_autre",
+      "possible_values": [],
+      "index": 37
+    },
+    {
+      "field_type": "oui/non",
+      "key": "comorbidite_exposition_toxique",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 38
+    },
+    {
+      "field_type": "oui/non",
+      "key": "comorbidite_antecedents_medicaments_nephrotoxiques",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 39
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "presentation_date_episode",
+      "possible_values": [],
+      "index": 40
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "presentation_lieu_debut",
+      "possible_values": [
+        "consultation_externe",
+        "urgences",
+        "service_hospitalisation",
+        "reanimation",
+        "transfert_autre_centre"
+      ],
+      "index": 41
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "presentation_raisons_debut",
+      "possible_values": [
+        "symptomes_uremiques",
+        "surcharge_hydrique",
+        "hyperkaliemie",
+        "acidose_metabolique",
+        "infection",
+        "evenement_cardiovasculaire",
+        "probleme_acces",
+        "initiation_planifiee",
+        "autre"
+      ],
+      "index": 42
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "presentation_symptomes",
+      "possible_values": [
+        "asthenie",
+        "douleur_abdominale",
+        "nausees_ou_vomissements",
+        "prurit",
+        "dyspnee",
+        "oedemes",
+        "anorexie",
+        "troubles_neurologiques",
+        "asymptomatique",
+        "autre"
+      ],
+      "index": 43
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "presentation_tas_mmhg",
+      "possible_values": [],
+      "index": 44
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "presentation_tad_mmhg",
+      "possible_values": [],
+      "index": 45
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "presentation_frequence_cardiaque_bpm",
+      "possible_values": [],
+      "index": 46
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "presentation_temperature_c",
+      "possible_values": [],
+      "index": 47
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "presentation_poids_kg",
+      "possible_values": [],
+      "index": 48
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "presentation_taille_cm",
+      "possible_values": [],
+      "index": 49
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "presentation_statut_diurese",
+      "possible_values": [
+        "anurique",
+        "oligurique",
+        "diurese_preservee",
+        "inconnu"
+      ],
+      "index": 50
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "presentation_volume_urinaire_ml_j",
+      "possible_values": [],
+      "index": 51
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "presentation_autonomie_fonctionnelle",
+      "possible_values": [
+        "autonome",
+        "partiellement_dependant",
+        "dependant",
+        "alite",
+        "inconnu"
+      ],
+      "index": 52
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "presentation_notes_examen_clinique",
+      "possible_values": [],
+      "index": 53
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "biologie_date_prelevement",
+      "possible_values": [],
+      "index": 54
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_dfg_mdrd_ml_min_1_73m2",
+      "possible_values": [],
+      "index": 55
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_creatinine_mg_l",
+      "possible_values": [],
+      "index": 56
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_uree_g_l",
+      "possible_values": [],
+      "index": 57
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_hemoglobine_g_dl",
+      "possible_values": [],
+      "index": 58
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_hba1c_pct",
+      "possible_values": [],
+      "index": 59
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_leucocytes_g_l",
+      "possible_values": [],
+      "index": 60
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "biologie_plaquettes_g_l",
+      "possible_values": [],
+      "index": 61
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_albumine_g_l",
+      "possible_values": [],
+      "index": 62
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_crp_mg_l",
+      "possible_values": [],
+      "index": 63
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_sodium_mmol_l",
+      "possible_values": [],
+      "index": 64
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_potassium_mmol_l",
+      "possible_values": [],
+      "index": 65
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_bicarbonates_mmol_l",
+      "possible_values": [],
+      "index": 66
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_calcium_corrige_mg_l",
+      "possible_values": [],
+      "index": 67
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_phosphore_mg_l",
+      "possible_values": [],
+      "index": 68
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_pth_pg_ml",
+      "possible_values": [],
+      "index": 69
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_ferritine_ng_ml",
+      "possible_values": [],
+      "index": 70
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_saturation_transferrine_pct",
+      "possible_values": [],
+      "index": 71
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_vitamine_d_ng_ml",
+      "possible_values": [],
+      "index": 72
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "biologie_proteinurie_g_24h",
+      "possible_values": [],
+      "index": 73
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "biologie_hbsag",
+      "possible_values": [
+        "positif",
+        "negatif",
+        "inconnu"
+      ],
+      "index": 74
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "biologie_vhc",
+      "possible_values": [
+        "positif",
+        "negatif",
+        "inconnu"
+      ],
+      "index": 75
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "biologie_vih",
+      "possible_values": [
+        "positif",
+        "negatif",
+        "inconnu"
+      ],
+      "index": 76
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "imagerie_date_echographie_renale",
+      "possible_values": [],
+      "index": 77
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "imagerie_taille_reins",
+      "possible_values": [
+        "petits",
+        "normaux",
+        "augmentes",
+        "asymetriques",
+        "non_rapporte"
+      ],
+      "index": 78
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "imagerie_echogenicite_renale",
+      "possible_values": [
+        "normale",
+        "augmentee",
+        "tres_augmentee",
+        "non_rapporte"
+      ],
+      "index": 79
+    },
+    {
+      "field_type": "oui/non",
+      "key": "imagerie_hydronephrose",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 80
+    },
+    {
+      "field_type": "oui/non",
+      "key": "imagerie_kystes_renaux",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 81
+    },
+    {
+      "field_type": "oui/non",
+      "key": "imagerie_lithiase",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 82
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "imagerie_radiographie_thorax",
+      "possible_values": [],
+      "index": 83
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "imagerie_date_echocardiographie",
+      "possible_values": [],
+      "index": 84
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "imagerie_fevg_pct",
+      "possible_values": [],
+      "index": 85
+    },
+    {
+      "field_type": "oui/non",
+      "key": "imagerie_hypertrophie_ventriculaire_gauche",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 86
+    },
+    {
+      "field_type": "texte libre",
+      "key": "imagerie_valvulopathie",
+      "possible_values": [],
+      "index": 87
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "imagerie_autres_resultats",
+      "possible_values": [],
+      "index": 88
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "dialyse_date_debut",
+      "possible_values": [],
+      "index": 89
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_modalite_initiale",
+      "possible_values": [
+        "hemodialyse",
+        "dialyse_peritoneale",
+        "hemofiltration",
+        "hybride",
+        "inconnu"
+      ],
+      "index": 90
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_modalite_actuelle",
+      "possible_values": [
+        "hemodialyse",
+        "dialyse_peritoneale",
+        "hemofiltration",
+        "hybride",
+        "inconnu"
+      ],
+      "index": 91
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_type_acces_initial",
+      "possible_values": [
+        "cathetere_non_tunnellise",
+        "cathetere_tunnellise",
+        "fistule_arterioveineuse",
+        "greffon_arterioveineux",
+        "cathetere_peritoneal",
+        "autre"
+      ],
+      "index": 92
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_site_acces_initial",
+      "possible_values": [
+        "jugulaire_interne_droite",
+        "jugulaire_interne_gauche",
+        "femorale",
+        "sous_claviere",
+        "fistule_avant_bras",
+        "fistule_bras",
+        "abdomen_dp",
+        "autre"
+      ],
+      "index": 93
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "dialyse_date_creation_acces",
+      "possible_values": [],
+      "index": 94
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "dialyse_date_premiere_utilisation_acces",
+      "possible_values": [],
+      "index": 95
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_jours_entre_catheter_et_fav",
+      "possible_values": [],
+      "index": 96
+    },
+    {
+      "field_type": "oui/non",
+      "key": "dialyse_acces_admission_tunnelise",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 97
+    },
+    {
+      "field_type": "oui/non",
+      "key": "dialyse_acces_admission_femoral",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 98
+    },
+    {
+      "field_type": "oui/non",
+      "key": "dialyse_acces_admission_fav",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 99
+    },
+    {
+      "field_type": "oui/non",
+      "key": "dialyse_acces_admission_peritoneale",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 100
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_seances_par_semaine",
+      "possible_values": [],
+      "index": 101
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_duree_seance_min",
+      "possible_values": [],
+      "index": 102
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_debit_sanguin_ml_min",
+      "possible_values": [],
+      "index": 103
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_debit_dialysat_ml_min",
+      "possible_values": [],
+      "index": 104
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "dialyse_potassium_dialysat_mmol_l",
+      "possible_values": [],
+      "index": 105
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "dialyse_calcium_dialysat_mmol_l",
+      "possible_values": [],
+      "index": 106
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_type_anticoagulation",
+      "possible_values": [
+        "heparine_non_fractionnee",
+        "heparine_bas_poids_moleculaire",
+        "sans_anticoagulation",
+        "citrate",
+        "autre"
+      ],
+      "index": 107
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_statut_fonction_renale_residuelle",
+      "possible_values": [
+        "anurique",
+        "oligurique",
+        "diurese_preservee",
+        "inconnu"
+      ],
+      "index": 108
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_type_regime_dp",
+      "possible_values": [
+        "dpca",
+        "dpa",
+        "dpi",
+        "non_applicable",
+        "autre"
+      ],
+      "index": 109
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_nombre_echanges_dp_jour",
+      "possible_values": [],
+      "index": 110
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "dialyse_volume_stase_dp_ml",
+      "possible_values": [],
+      "index": 111
+    },
+    {
+      "field_type": "oui/non",
+      "key": "dialyse_information_transplantation_donnee",
+      "possible_values": [
+        "oui",
+        "non"
+      ],
+      "index": 112
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "dialyse_statut_liste_attente_transplantation",
+      "possible_values": [
+        "non_evalue",
+        "bilan_en_cours",
+        "inscrit",
+        "non_eligible",
+        "temporairement_inactif",
+        "refuse"
+      ],
+      "index": 113
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "transplantation_bilan_pretransplantation",
+      "possible_values": [],
+      "index": 114
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "immunologie_transfusion_immunisation",
+      "possible_values": [],
+      "index": 115
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "qualite_date_evaluation",
+      "possible_values": [],
+      "index": 116
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "qualite_spktv",
+      "possible_values": [],
+      "index": 117
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "qualite_urr_pct",
+      "possible_values": [],
+      "index": 118
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "qualite_prise_poids_interdialytique_kg",
+      "possible_values": [],
+      "index": 119
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "qualite_taux_ultrafiltration_ml_kg_h",
+      "possible_values": [],
+      "index": 120
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "qualite_tas_predialyse_mmhg",
+      "possible_values": [],
+      "index": 121
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "qualite_tas_postdialyse_mmhg",
+      "possible_values": [],
+      "index": 122
+    },
+    {
+      "field_type": "nombre décimal",
+      "key": "qualite_poids_sec_kg",
+      "possible_values": [],
+      "index": 123
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "qualite_seances_manquees_30j",
+      "possible_values": [],
+      "index": 124
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "qualite_seances_raccourcies_30j",
+      "possible_values": [],
+      "index": 125
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "qualite_hypotensions_intradialytiques_30j",
+      "possible_values": [],
+      "index": 126
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "qualite_observance_declaree_patient",
+      "possible_values": [
+        "bonne",
+        "partielle",
+        "mauvaise",
+        "inconnu"
+      ],
+      "index": 127
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_connaissance_pratique_dialyse",
+      "possible_values": [],
+      "index": 128
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_soins_acces_vasculaire",
+      "possible_values": [],
+      "index": 129
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_surveillance_poids_fluides",
+      "possible_values": [],
+      "index": 130
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_dietetique",
+      "possible_values": [],
+      "index": 131
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_traitements_associes",
+      "possible_values": [],
+      "index": 132
+    },
+    {
+      "field_type": "texte libre",
+      "key": "education_complications",
+      "possible_values": [],
+      "index": 133
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "traitement_medicaments_renaux_actuels",
+      "possible_values": [
+        "ase",
+        "fer_iv",
+        "fer_oral",
+        "chelateur_du_phosphore",
+        "vitamine_d",
+        "calcimimetique",
+        "antihypertenseur",
+        "diuretique",
+        "bicarbonate",
+        "antiagregant_ou_anticoagulant",
+        "autre"
+      ],
+      "index": 134
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "traitement_autres_notes",
+      "possible_values": [],
+      "index": 135
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "complication_debut_periode_suivi",
+      "possible_values": [],
+      "index": 136
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "complication_fin_periode_suivi",
+      "possible_values": [],
+      "index": 137
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "complication_liste",
+      "possible_values": [
+        "infection",
+        "trouble_hydroelectrolytique",
+        "evenement_cardiovasculaire",
+        "hemorragie",
+        "dysfonction_acces",
+        "crise_convulsive",
+        "hypotension",
+        "peritonite",
+        "thrombose",
+        "autre"
+      ],
+      "index": 138
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "complication_date_premier_evenement",
+      "possible_values": [],
+      "index": 139
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "complication_nombre_hospitalisations",
+      "possible_values": [],
+      "index": 140
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "complication_jours_hospitalisation",
+      "possible_values": [],
+      "index": 141
+    },
+    {
+      "field_type": "liste à choix multiple",
+      "key": "complication_motifs_hospitalisation",
+      "possible_values": [
+        "infection",
+        "evenement_cardiovasculaire",
+        "surcharge_hydrique",
+        "probleme_acces",
+        "hemorragie",
+        "trouble_metabolique",
+        "procedure_planifiee",
+        "autre"
+      ],
+      "index": 142
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "complication_changement_modalite_dialyse",
+      "possible_values": [
+        "aucun",
+        "hemodialyse_vers_dialyse_peritoneale",
+        "dialyse_peritoneale_vers_hemodialyse",
+        "changement_temporaire",
+        "autre"
+      ],
+      "index": 143
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "complication_autres_notes",
+      "possible_values": [],
+      "index": 144
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "devenir_date_dernier_suivi",
+      "possible_values": [],
+      "index": 145
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "devenir_statut",
+      "possible_values": [
+        "vivant_sous_dialyse",
+        "decede",
+        "transplante",
+        "recuperation_fonction_renale",
+        "perdu_de_vue",
+        "transfere_sortant"
+      ],
+      "index": 146
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "devenir_date_deces",
+      "possible_values": [],
+      "index": 147
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "devenir_cause_deces",
+      "possible_values": [
+        "cardiovasculaire",
+        "infection",
+        "hemorragie",
+        "mort_subite",
+        "cancer",
+        "autre",
+        "inconnue"
+      ],
+      "index": 148
+    },
+    {
+      "field_type": "nombre entier",
+      "key": "devenir_delai_deces_jours",
+      "possible_values": [],
+      "index": 149
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "devenir_date_transplantation",
+      "possible_values": [],
+      "index": 150
+    },
+    {
+      "field_type": "texte libre",
+      "key": "devenir_qualite_vie",
+      "possible_values": [],
+      "index": 151
+    },
+    {
+      "field_type": "texte libre",
+      "key": "devenir_categorie_pronostique",
+      "possible_values": [],
+      "index": 152
+    },
+    {
+      "field_type": "texte libre long",
+      "key": "devenir_notes",
+      "possible_values": [],
+      "index": 153
+    }
+  ]
+}
