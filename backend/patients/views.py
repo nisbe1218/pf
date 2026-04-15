@@ -786,8 +786,12 @@ def upsert_template_from_headers(headers, worksheet, source_file_name):
 		if not header:
 			continue
 
-		key = normalize_header(header)
-		if key in existing_fields:
+		header_str = str(header).strip()
+		if not header_str or header_str.lower().startswith('unnamed'):
+			continue
+
+		key = normalize_header(header_str)
+		if not key or key.startswith('unnamed') or key in existing_fields:
 			continue
 
 		PatientFormField.objects.create(
@@ -836,6 +840,9 @@ def build_patient_payload(row):
 			payload.setdefault(section_field, {})
 			target_key = resolved_section_key or normalized
 			payload[section_field][target_key] = normalize_section_value(target_key, value, normalized)
+
+		if normalized.startswith('unnamed'):
+			continue
 
 		mapped_field = resolve_mapped_field(normalized)
 		if not mapped_field and resolved_section_key:
@@ -1428,6 +1435,9 @@ class PatientImportExcelView(APIView):
 				dataframe = pd.read_excel(excel_file)
 			except Exception as error:
 				return Response({'error': f'Impossible de lire les donnees du fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
+		if dataframe is not None:
+			dataframe = dataframe.loc[:, ~dataframe.columns.astype(str).str.match(r'^(Unnamed|unnamed)(:.*)?$')]
+
 		headers = list(dataframe.columns)
 		template = upsert_template_from_headers(headers, worksheet, source_file_name)
 

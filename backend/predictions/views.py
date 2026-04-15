@@ -1,5 +1,11 @@
+import os
 import re
 from datetime import date, datetime, timedelta
+
+os.environ.setdefault('JOBLIB_START_METHOD', 'threading')
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
 
 import joblib
 import numpy as np
