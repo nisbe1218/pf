@@ -61,6 +61,29 @@ function normalizeIdEnregistrement(id) {
   return `SRC-${num}`;
 }
 
+const getNumericPatientId = (value) => {
+  if (value === null || value === undefined) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const numericOnly = normalized.match(/^\d+$/);
+  if (numericOnly) {
+    return Number.parseInt(numericOnly[0], 10);
+  }
+
+  const trailingDigits = normalized.match(/(\d+)$/);
+  if (trailingDigits) {
+    return Number.parseInt(trailingDigits[1], 10);
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+};
+
 const emptyForm = {
   id: null,
   nom: '',
@@ -282,7 +305,7 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'biologie_potassium_mmol_l',
   'biologie_bicarbonates_mmol_l',
   'biologie_calcium_corrige_mg_l',
-  'biologie_phosphore_g_l',
+  'biologie_phosphore_mg_l',
   'biologie_pth_pg_ml',
   'biologie_ferritine_ng_ml',
   'biologie_saturation_transferrine_pct',
@@ -511,7 +534,6 @@ function PatientsManagement() {
       return { status: 'idle', approvedBy: null, requestedBy: null, timestamp: null, pendingIds: [] };
     }
   });
-  const [showAllDynamicColumns, setShowAllDynamicColumns] = useState(false);
   const [showAllRows, setShowAllRows] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedPatientIds, setSelectedPatientIds] = useState([]);
@@ -559,25 +581,18 @@ function PatientsManagement() {
     patients.forEach((patient) => {
       Object.keys(patient.extra_data || {}).forEach((key) => keys.add(key));
     });
-    return Array.from(keys).filter((key) => !schemaFieldKeySet.has(key));
+    return Array.from(keys).filter((key) => !schemaFieldKeySet.has(key) && !key.toLowerCase().startsWith('unnamed'));
   }, [patients, schemaFieldKeySet]);
 
-  const visibleExtraColumns = useMemo(() => {
-    if (showAllDynamicColumns) {
-      return extraColumns;
-    }
-    return extraColumns.slice(0, INITIAL_DYNAMIC_COLUMNS_LIMIT);
-  }, [extraColumns, showAllDynamicColumns]);
-
   const formDynamicExtraColumns = useMemo(() => {
-    const keys = new Set(extraColumns);
+    const keys = new Set();
     Object.keys(extraDataValues || {}).forEach((key) => {
-      if (!schemaFieldKeySet.has(key)) {
+      if (!schemaFieldKeySet.has(key) && !key.toLowerCase().startsWith('unnamed')) {
         keys.add(key);
       }
     });
     return Array.from(keys).sort((a, b) => a.localeCompare(b));
-  }, [extraColumns, extraDataValues, schemaFieldKeySet]);
+  }, [extraDataValues, schemaFieldKeySet]);
 
   const visiblePatients = useMemo(() => {
     if (showAllRows) {
@@ -632,17 +647,15 @@ function PatientsManagement() {
     const orderedKeys = Array.from(DEFAULT_PATIENT_COLUMN_KEYS);
     const seenKeys = new Set(orderedKeys);
 
-    patients.forEach((patient) => {
-      Object.keys(patient).forEach((key) => {
-        if (key !== 'id' && !seenKeys.has(key)) {
-          seenKeys.add(key);
-          orderedKeys.push(key);
-        }
-      });
+    tableDisplaySchemaFields.forEach((field) => {
+      if (!seenKeys.has(field.key)) {
+        seenKeys.add(field.key);
+        orderedKeys.push(field.key);
+      }
     });
 
     return orderedKeys;
-  }, [patients]);
+  }, [tableDisplaySchemaFields]);
 
   const orderedSchemaFieldsForForm = useMemo(() => {
     const schemaFieldMap = new Map(tableSchemaFields.map((field) => [field.key, field]));
@@ -986,7 +999,6 @@ function PatientsManagement() {
     const qualityColumns = [
       ...fixedBaseColumns.map((column) => ({ key: column.key, label: column.label, isExtra: false })),
       ...tableDisplaySchemaFields.map((field) => ({ key: field.key, label: field.label, isExtra: false })),
-      ...visibleExtraColumns.map((columnKey) => ({ key: columnKey, label: columnKey, isExtra: true })),
     ];
 
     const fillRates = qualityColumns.map((column) => {
@@ -1100,7 +1112,7 @@ function PatientsManagement() {
       profile3dPoints: profile3dPoints.slice(0, 1200),
       weakestColumns: fillRates.slice(0, 10),
     };
-  }, [fixedBaseColumns, patients, tableDisplaySchemaFields, visibleExtraColumns]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fixedBaseColumns, patients, tableDisplaySchemaFields]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthlyInclusionChartData = useMemo(() => ({
     labels: analysisSummary.monthlyInclusions.map((item) => item.label),
@@ -1320,7 +1332,17 @@ function PatientsManagement() {
       if (!Array.isArray(data)) {
         return [];
       }
-      return data.map(flattenPatientRow);
+
+      return data
+        .map(flattenPatientRow)
+        .sort((a, b) => {
+          const aId = getNumericPatientId(a.id_patient ?? a.id);
+          const bId = getNumericPatientId(b.id_patient ?? b.id);
+          if (aId !== bId) {
+            return aId - bId;
+          }
+          return (a.id ?? 0) - (b.id ?? 0);
+        });
     };
 
     try {
@@ -1501,14 +1523,6 @@ function PatientsManagement() {
   const handleSearch = async (event) => {
     event.preventDefault();
     await loadPatients(filters);
-  };
-
-  const handleToggleDynamicColumns = () => {
-    setShowAllDynamicColumns((current) => {
-      const next = !current;
-      setSuccess(next ? 'Toutes les colonnes dynamiques sont affichees.' : 'Affichage des colonnes dynamiques limite.');
-      return next;
-    });
   };
 
   const handleSave = async (event) => {
@@ -1758,13 +1772,11 @@ function PatientsManagement() {
       const headerRow = [
         ...fixedBaseColumns.map((column) => column.label),
         ...tableDisplaySchemaFields.map((field) => field.label),
-        ...visibleExtraColumns,
       ];
 
       const rows = visiblePatients.map((patient) => [
         ...fixedBaseColumns.map((column) => renderValue(resolveTableCellValue(patient, column.key), column.key, patient)),
         ...tableDisplaySchemaFields.map((field) => renderValue(resolveTableCellValue(patient, field.key), field.key, patient)),
-        ...visibleExtraColumns.map((columnKey) => renderValue(formatExtraValue(columnKey, patient?.extra_data?.[columnKey]), columnKey, patient)),
       ]);
 
       const csvContent = [headerRow, ...rows]
@@ -2358,18 +2370,6 @@ function PatientsManagement() {
                       )}
 
                       <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center">
-                        {extraColumns.length > INITIAL_DYNAMIC_COLUMNS_LIMIT && (
-                          <Button
-                            size="small"
-                            variant={showAllDynamicColumns ? 'outlined' : 'contained'}
-                            onClick={handleToggleDynamicColumns}
-                            sx={{ textTransform: 'none', borderRadius: 2, fontWeight: 700 }}
-                          >
-                            {showAllDynamicColumns
-                              ? 'Masquer colonnes dynamiques'
-                              : `Afficher toutes les colonnes dynamiques (${extraColumns.length})`}
-                          </Button>
-                        )}
                         {patients.length > INITIAL_ROWS_LIMIT && (
                           <Button
                             size="small"
@@ -2436,7 +2436,7 @@ function PatientsManagement() {
                   )}
 
                   <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, overflowX: 'auto' }}>
-                    <Table size="small" sx={{ minWidth: Math.max(900, (fixedBaseColumns.length + tableDisplaySchemaFields.length + visibleExtraColumns.length) * 130) }}>
+                    <Table size="small" sx={{ minWidth: Math.max(900, (fixedBaseColumns.length + tableDisplaySchemaFields.length) * 130) }}>
                       <TableHead>
                         <TableRow sx={{ background: 'linear-gradient(135deg, rgba(22,90,114,0.08), rgba(31,122,140,0.14))' }}>
                           <TableCell padding="checkbox" sx={{ fontWeight: 800 }}>

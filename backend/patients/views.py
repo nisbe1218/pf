@@ -107,9 +107,59 @@ SECTION_FIELD_ALIASES = {
 	'renal_biopsy_status': 'irc_statut_biopsie_renale',
 	'renal_biopsy_result': 'irc_resultat_biopsie_renale',
 	'known_before_dialysis': 'irc_connue_avant_dialyse',
-	'diabetes_status': 'comorbidite_statut_diabete',
-	'comorbidities': 'comorbidite_liste',
-	'other_comorbidity': 'comorbidite_autre',
+	'pre_dialysis_followup_months': 'irc_duree_suivi_predialytique_mois',
+	'hypertension': 'comorbidite_liste',
+	'heart_disease': 'comorbidite_liste',
+	'obstructive_uropathy': 'irc_etiologie_secondaire',
+	'gout': 'comorbidite_liste',
+	'hereditary_kidney_disease': 'irc_maladie_renale_hereditaire',
+	'toxic_exposure': 'comorbidite_exposition_toxique',
+	'nephrotoxic_drugs_history': 'comorbidite_antecedents_medicaments_nephrotoxiques',
+	'asthenia': 'presentation_symptomes',
+	'abdominal_pain': 'presentation_symptomes',
+	'nausea': 'presentation_symptomes',
+	'pruritus': 'presentation_symptomes',
+	'asymptomatic': 'presentation_symptomes',
+	'consciousness_disorder': 'presentation_symptomes',
+	'urea_baseline': 'biologie_uree_g_l',
+	'creatinine_baseline': 'biologie_creatinine_mg_l',
+	'egfr_mdrd': 'biologie_dfg_mdrd_ml_min_1_73m2',
+	'hemoglobin_baseline': 'biologie_hemoglobine_g_dl',
+	'albumin_baseline': 'biologie_albumine_g_l',
+	'potassium_baseline': 'biologie_potassium_mmol_l',
+	'calcium_baseline': 'biologie_calcium_corrige_mg_l',
+	'phosphorus_baseline': 'biologie_phosphore_mg_l',
+	'bicarbonate_baseline': 'biologie_bicarbonates_mmol_l',
+	'sodium_baseline': 'biologie_sodium_mmol_l',
+	'pth_baseline': 'biologie_pth_pg_ml',
+	'ferritin_baseline': 'biologie_ferritine_ng_ml',
+	'vitamin_d_baseline': 'biologie_vitamine_d_ng_ml',
+	'proteinuria_baseline': 'biologie_proteinurie_g_24h',
+	'initial_access_type': 'dialyse_type_acces_initial',
+	'femoral_catheter': 'dialyse_acces_admission_femoral',
+	'tunneled_catheter': 'dialyse_acces_admission_tunnelise',
+	'arteriovenous_fistula': 'dialyse_acces_admission_fav',
+	'peritoneal_catheter': 'dialyse_acces_admission_peritoneale',
+	'access_at_center_admission': 'dialyse_site_acces_initial',
+	'admission_tunneled_catheter': 'dialyse_acces_admission_tunnelise',
+	'admission_femoral_catheter': 'dialyse_acces_admission_femoral',
+	'admission_arteriovenous_fistula': 'dialyse_acces_admission_fav',
+	'admission_peritoneal_catheter': 'dialyse_acces_admission_peritoneale',
+	'days_between_catheter_and_avf': 'dialyse_jours_entre_catheter_et_fav',
+	'renal_transplant': 'transplantation',
+	'transplant_informed': 'transplant_informed',
+	'transplant_waitlist': 'transplant_waitlist',
+	'pretransplant_workup': 'transplantation_bilan_pretransplantation',
+	'blood_transfusion_immunization': 'immunologie_transfusion_immunisation',
+	'dialysis_practical_knowledge': 'education_connaissance_pratique_dialyse',
+	'access_care_education': 'education_soins_acces_vasculaire',
+	'fluid_weight_monitoring': 'education_surveillance_poids_fluides',
+	'diet_education': 'education_dietetique',
+	'associated_treatments_education': 'education_traitements_associes',
+	'complication_education': 'education_complications',
+	'therapeutic_education': 'irc_themes_education_therapeutique',
+	'disease_understanding': 'irc_niveau_comprehension_patient',
+	'replacement_therapy_knowledge': 'irc_preference_therapie_renale',
 	'episode_date': 'presentation_date_episode',
 	'start_location': 'presentation_lieu_debut',
 	'start_reasons': 'presentation_raisons_debut',
@@ -433,7 +483,10 @@ def refresh_postgres_flat_view(template=None):
 	if template is None:
 		return
 
-	keys = list(template.fields.order_by('order', 'id').values_list('key', flat=True))
+	keys = [
+		key for key in template.fields.order_by('order', 'id').values_list('key', flat=True)
+		if key and not key.startswith('unnamed')
+	]
 	if not keys:
 		return
 
@@ -761,7 +814,7 @@ def parse_schema_from_template_sheet(worksheet, source_file_name):
 	return template, len(created_fields)
 
 
-def upsert_template_from_headers(headers, worksheet, source_file_name):
+def upsert_template_from_headers(headers, worksheet, source_file_name, create_fields=True):
 	template = None
 	for template_name in FIXED_CLASSEUR_TEMPLATE_NAMES:
 		template = (
@@ -779,6 +832,18 @@ def upsert_template_from_headers(headers, worksheet, source_file_name):
 		if worksheet and getattr(worksheet, 'title', None):
 			template.sheet_name = worksheet.title
 		template.save(update_fields=['source_file_name', 'sheet_name'])
+
+	if not create_fields:
+		bad_keys = {k for k, v in STANDARD_FIELD_ALIASES.items() if k != v}
+		bad_keys |= {k for k, v in SECTION_FIELD_ALIASES.items() if k != v}
+		template.fields.filter(key__startswith='unnamed').delete()
+		template.fields.filter(key__in=bad_keys).delete()
+		template.fields.filter(source_hint='auto_detected_from_data_import').delete()
+		try:
+			refresh_postgres_flat_view(template)
+		except Exception:
+			pass
+		return template
 
 	existing_fields = {field.key: field for field in template.fields.all()}
 
@@ -1439,7 +1504,7 @@ class PatientImportExcelView(APIView):
 			dataframe = dataframe.loc[:, ~dataframe.columns.astype(str).str.match(r'^(Unnamed|unnamed)(:.*)?$')]
 
 		headers = list(dataframe.columns)
-		template = upsert_template_from_headers(headers, worksheet, source_file_name)
+		template = upsert_template_from_headers(headers, worksheet, source_file_name, create_fields=False)
 
 		created_count = 0
 		row_errors = []

@@ -206,3 +206,11 @@ class PatientFormTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PatientFormTemplate
         fields = ['id', 'name', 'source_file_name', 'sheet_name', 'imported_at', 'fields']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['fields'] = [
+            field for field in data.get('fields', [])
+            if field.get('key') and not field.get('key').startswith('unnamed') and field.get('source_hint') != 'auto_detected_from_data_import'
+        ]
+        return data

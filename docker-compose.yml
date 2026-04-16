@@ -47,6 +47,7 @@ services:
       - "3000:3000"
     environment:
       - WATCHPACK_POLLING=true # Pour le rechargement à chaud sur Windows
+      - REACT_APP_API_URL=http://localhost:8000/api/
     depends_on:
       - backend
     restart: unless-stopped
