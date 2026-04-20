@@ -5,8 +5,7 @@ from datetime import date, datetime, timedelta
 os.environ.setdefault('OMP_NUM_THREADS', '1')
 os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 os.environ.setdefault('MKL_NUM_THREADS', '1')
-
-import joblib
+# import joblib  # TEMPORAIREMENT COMMENTÉ POUR DÉBLOQUER DJANGO
 import numpy as np
 import pandas as pd
 from django.conf import settings

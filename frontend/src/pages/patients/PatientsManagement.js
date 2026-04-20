@@ -1944,17 +1944,19 @@ function PatientsManagement() {
     <Box
       sx={{
         minHeight: '100vh',
-        py: 2,
+        py: 0,
+        px: 0,
         background: 'radial-gradient(circle at top left, rgba(77, 142, 166, 0.12), transparent 24%), linear-gradient(180deg, #f2f7fb 0%, #edf3f8 100%)',
+        overflowX: 'hidden',
       }}
     >
-      <Grid container spacing={2} alignItems="flex-start">
-        <Grid item xs={12} md={3} lg={2}>
+      <Grid container spacing={2} alignItems="flex-start" sx={{ width: '100%', minWidth: 0 }}>
+        <Grid item xs={12} md={3} lg={2} sx={{ minWidth: 0 }}>
           <AppSidebar />
         </Grid>
 
-        <Grid item xs={12} md={9} lg={10}>
-      <Stack spacing={3}>
+        <Grid item xs={12} md={9} lg={10} sx={{ minWidth: 0 }}>
+          <Stack spacing={3}>
         {mainSection === 'data_patient' ? (
           <>
         <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94, 115, 141, 0.12)' }}>

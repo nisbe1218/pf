@@ -337,7 +337,8 @@ function Dashboard() {
       sx={{
         flexGrow: 1,
         minHeight: '100vh',
-        py: { xs: 2, md: 3 },
+        pt: 0,
+        pb: 3,
         px: { xs: 0, md: 1 },
         background: 'radial-gradient(circle at top left, rgba(102, 190, 219, 0.18), transparent 22%), radial-gradient(circle at bottom right, rgba(163, 221, 228, 0.14), transparent 18%), linear-gradient(180deg, #eaf7fb 0%, #f4fbff 100%)',
       }}

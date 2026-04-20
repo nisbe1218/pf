@@ -5,8 +5,8 @@ djangorestframework-simplejwt
 pandas
 openpyxl
 xlrd
-scikit-learn
-joblib
+scikit-learn>=1.3.0
+joblib>=1.3.2
 numpy
 bcrypt
 python-dotenv

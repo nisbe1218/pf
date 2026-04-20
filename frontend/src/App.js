@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Container } from '@mui/material';
+import { Box } from '@mui/material';
 import Dashboard from './pages/dashboard/Dashboard';
 import Login from './pages/auth/Login';
 import Unauthorized from './pages/unauthorized/Unauthorized';
@@ -13,7 +13,9 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <Container maxWidth="xl" sx={{ pt: 4, pb: 4 }}>
+        <Box
+          sx={{ width: '100%', minHeight: '100vh', pt: 0, pb: 4, px: 0, mx: 0, minWidth: 0, overflowX: 'hidden' }}
+        >
           <Routes>
             {/* Route Publique */}
             <Route path="/login" element={<Login />} />
@@ -34,7 +36,7 @@ function App() {
             {/* Redirection par défaut */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-        </Container>
+        </Box>
       </Router>
     </AuthProvider>
   );
