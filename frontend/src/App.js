@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Box } from '@mui/material';
 import Dashboard from './pages/dashboard/Dashboard';
+import Landing from './pages/auth/Landing';
 import Login from './pages/auth/Login';
 import Unauthorized from './pages/unauthorized/Unauthorized';
 import PatientsManagement from './pages/patients/PatientsManagement';
@@ -17,7 +18,8 @@ function App() {
           sx={{ width: '100%', minHeight: '100vh', pt: 0, pb: 4, px: 0, mx: 0, minWidth: 0, overflowX: 'hidden' }}
         >
           <Routes>
-            {/* Route Publique */}
+            {/* Page d’accueil publique */}
+            <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
 
@@ -34,7 +36,7 @@ function App() {
             {/* Les autres rôles viendront ici (ex: routes admin, route patients) */}
 
             {/* Redirection par défaut */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Box>
       </Router>
