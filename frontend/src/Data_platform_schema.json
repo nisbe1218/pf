@@ -1,0 +1,84 @@
+{
+  "workbook": "data_platform.xlsx",
+  "sheet": "Plateform_donnees_complete",
+  "rows": 28,
+  "columns": 135,
+  "fields": [
+    {
+      "field_type": "généré automatiquement",
+      "key": "id_patient",
+      "possible_values": [],
+      "index": 1
+    },
+    {
+      "field_type": "texte libre court",
+      "key": "id_enregistrement_source",
+      "possible_values": [],
+      "index": 2
+    },
+    {
+      "field_type": "texte libre court",
+      "key": "id_site",
+      "possible_values": [],
+      "index": 3
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "statut_inclusion",
+      "possible_values": [
+        "depiste",
+        "en_suivi",
+        "inclus",
+        "retire",
+        "termine"
+      ],
+      "index": 4
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "statut_consentement",
+      "possible_values": [
+        "consenti",
+        "en_attente",
+        "non_applicable",
+        "refuse"
+      ],
+      "index": 5
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "date_evaluation_initiale",
+      "possible_values": [],
+      "index": 6
+    },
+    {
+      "field_type": "généré automatiquement",
+      "key": "utilisateur_saisie",
+      "possible_values": [],
+      "index": 7
+    },
+    {
+      "field_type": "généré automatiquement",
+      "key": "derniere_mise_a_jour",
+      "possible_values": [],
+      "index": 8
+    },
+    {
+      "field_type": "liste à choix unique",
+      "key": "demographie_sexe",
+      "possible_values": [
+        "femme",
+        "homme",
+        "inconnu",
+        "intersexe"
+      ],
+      "index": 9
+    },
+    {
+      "field_type": "sélecteur de date",
+      "key": "demographie_date_naissance",
+      "possible_values": [],
+      "index": 10
+    }
+  ]
+}

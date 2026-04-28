@@ -238,7 +238,7 @@ function Connexion() {
                     clipPath: 'polygon(50% 0, 100% 0, 100% 100%)', // Right triangle shape next to the blue area
                   }}
                 >
-                  {[...Array(100)].map((_, index) => (
+                  {[...Array(200)].map((_, index) => (
                     <Box
                       key={index}
                       sx={{

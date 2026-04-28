@@ -51,6 +51,7 @@ import {
 } from 'chart.js';
 import api from '../../services/api/axios';
 import { AuthContext } from '../../context/AuthContext';
+import defaultSchemaTemplate from '../../Data_platform_schema.json';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
 
@@ -214,6 +215,23 @@ const PATIENT_FIELD_MAP = {
   derniere_mise_a_jour: 'derniere_mise_a_jour',
 };
 
+const normalizeSchemaTemplate = (rawTemplate) => ({
+  fields: (rawTemplate?.fields || []).map((field) => ({
+    ...field,
+    label: field.label || String(field.key).replace(/_/g, ' '),
+    order: field.index ?? 0,
+    choices: field.possible_values || [],
+  })),
+});
+
+const DEFAULT_SCHEMA_TEMPLATE = normalizeSchemaTemplate(defaultSchemaTemplate);
+
+const TABLE_COLUMN_LABEL_OVERRIDES = {
+  icc_charlson: 'ICC (Charlson)',
+};
+
+const getTableHeaderLabel = (columnKey) => TABLE_COLUMN_LABEL_OVERRIDES[columnKey] || columnKey;
+
 const FIXED_BASE_COLUMNS = [
   { key: 'id_patient', label: 'id_patient' },
   { key: 'nom', label: 'nom' },
@@ -243,17 +261,16 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'id_site',
   'statut_inclusion',
   'statut_consentement',
+  'date_evaluation_initiale',
   'utilisateur_saisie',
   'derniere_mise_a_jour',
-  'date_evaluation_initiale',
   'demographie_sexe',
   'demographie_date_naissance',
-  'demographie_age_ans',
   'demographie_statut_matrimonial',
-  'demographie_mode_vie',
   'demographie_zone_residence',
   'demographie_distance_centre_km',
   'demographie_couverture_sociale',
+  'demographie_mode_vie',
   'demographie_statut_professionnel',
   'demographie_niveau_education',
   'demographie_tabagisme',
@@ -268,15 +285,13 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'irc_connue_avant_dialyse',
   'irc_source_adressage',
   'irc_contexte_debut_dialyse',
-  'irc_duree_suivi_predialytique_mois',
   'irc_themes_education_therapeutique',
   'irc_niveau_comprehension_patient',
   'irc_preference_therapie_renale',
   'comorbidite_statut_diabete',
+  'icc_charlson',
   'comorbidite_liste',
   'comorbidite_autre',
-  'comorbidite_exposition_toxique',
-  'comorbidite_antecedents_medicaments_nephrotoxiques',
   'presentation_date_episode',
   'presentation_lieu_debut',
   'presentation_raisons_debut',
@@ -292,11 +307,9 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'presentation_autonomie_fonctionnelle',
   'presentation_notes_examen_clinique',
   'biologie_date_prelevement',
-  'biologie_dfg_mdrd_ml_min_1_73m2',
-  'biologie_creatinine_mg_l',
   'biologie_uree_g_l',
+  'biologie_creatinine_mg_l',
   'biologie_hemoglobine_g_dl',
-  'biologie_hba1c_pct',
   'biologie_leucocytes_g_l',
   'biologie_plaquettes_g_l',
   'biologie_albumine_g_l',
@@ -311,6 +324,7 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'biologie_saturation_transferrine_pct',
   'biologie_vitamine_d_ng_ml',
   'biologie_proteinurie_g_24h',
+  'biologie_hba1c_pct',
   'biologie_hbsag',
   'biologie_vhc',
   'biologie_vih',
@@ -333,11 +347,6 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'dialyse_site_acces_initial',
   'dialyse_date_creation_acces',
   'dialyse_date_premiere_utilisation_acces',
-  'dialyse_jours_entre_catheter_et_fav',
-  'dialyse_acces_admission_tunnelise',
-  'dialyse_acces_admission_femoral',
-  'dialyse_acces_admission_fav',
-  'dialyse_acces_admission_peritoneale',
   'dialyse_seances_par_semaine',
   'dialyse_duree_seance_min',
   'dialyse_debit_sanguin_ml_min',
@@ -351,8 +360,6 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'dialyse_volume_stase_dp_ml',
   'dialyse_information_transplantation_donnee',
   'dialyse_statut_liste_attente_transplantation',
-  'transplantation_bilan_pretransplantation',
-  'immunologie_transfusion_immunisation',
   'qualite_date_evaluation',
   'qualite_spktv',
   'qualite_urr_pct',
@@ -365,14 +372,6 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'qualite_seances_raccourcies_30j',
   'qualite_hypotensions_intradialytiques_30j',
   'qualite_observance_declaree_patient',
-  'education_connaissance_pratique_dialyse',
-  'education_soins_acces_vasculaire',
-  'education_surveillance_poids_fluides',
-  'education_dietetique',
-  'education_traitements_associes',
-  'education_complications',
-  'traitement_medicaments_renaux_actuels',
-  'traitement_autres_notes',
   'complication_debut_periode_suivi',
   'complication_fin_periode_suivi',
   'complication_liste',
@@ -382,11 +381,12 @@ const DEFAULT_PATIENT_COLUMN_KEYS = [
   'complication_motifs_hospitalisation',
   'complication_changement_modalite_dialyse',
   'complication_autres_notes',
+  'traitement_medicaments_renaux_actuels',
+  'traitement_autres_notes',
   'devenir_date_dernier_suivi',
   'devenir_statut',
   'devenir_date_deces',
   'devenir_cause_deces',
-  'devenir_delai_deces_jours',
   'devenir_date_transplantation',
   'devenir_qualite_vie',
   'devenir_categorie_pronostique',
@@ -644,18 +644,8 @@ function PatientsManagement() {
   }, [tableSchemaFields]);
 
   const patientColumnKeys = useMemo(() => {
-    const orderedKeys = Array.from(DEFAULT_PATIENT_COLUMN_KEYS);
-    const seenKeys = new Set(orderedKeys);
-
-    tableDisplaySchemaFields.forEach((field) => {
-      if (!seenKeys.has(field.key)) {
-        seenKeys.add(field.key);
-        orderedKeys.push(field.key);
-      }
-    });
-
-    return orderedKeys;
-  }, [tableDisplaySchemaFields]);
+    return Array.from(DEFAULT_PATIENT_COLUMN_KEYS);
+  }, []);
 
   const orderedSchemaFieldsForForm = useMemo(() => {
     const schemaFieldMap = new Map(tableSchemaFields.map((field) => [field.key, field]));
@@ -1769,15 +1759,11 @@ function PatientsManagement() {
   const handleExportExcel = () => {
     setError('');
     try {
-      const headerRow = [
-        ...fixedBaseColumns.map((column) => column.label),
-        ...tableDisplaySchemaFields.map((field) => field.label),
-      ];
+      const headerRow = patientColumnKeys.map((columnKey) => getTableHeaderLabel(columnKey));
 
-      const rows = visiblePatients.map((patient) => [
-        ...fixedBaseColumns.map((column) => renderValue(resolveTableCellValue(patient, column.key), column.key, patient)),
-        ...tableDisplaySchemaFields.map((field) => renderValue(resolveTableCellValue(patient, field.key), field.key, patient)),
-      ]);
+      const rows = visiblePatients.map((patient) =>
+        patientColumnKeys.map((columnKey) => renderValue(resolveTableCellValue(patient, columnKey), columnKey, patient)),
+      );
 
       const csvContent = [headerRow, ...rows]
         .map((row) => row.map((cell) => `"${escapeCsvCell(cell)}"`).join(';'))
@@ -2451,7 +2437,9 @@ function PatientsManagement() {
                             />
                           </TableCell>
                           {patientColumnKeys.map((columnKey) => (
-                            <TableCell key={`flat-head-${columnKey}`} sx={{ fontWeight: 800 }}>{columnKey}</TableCell>
+                            <TableCell key={`flat-head-${columnKey}`} sx={{ fontWeight: 800 }}>
+                              {getTableHeaderLabel(columnKey)}
+                            </TableCell>
                           ))}
                         </TableRow>
                       </TableHead>
@@ -2473,7 +2461,7 @@ function PatientsManagement() {
                             </TableCell>
                             {patientColumnKeys.map((columnKey) => (
                               <TableCell key={`${getPatientUniqueId(patient)}-${columnKey}`}>
-                                {renderValue(patient[columnKey], columnKey, patient)}
+                                {renderValue(resolveTableCellValue(patient, columnKey), columnKey, patient)}
                               </TableCell>
                             ))}
                           </TableRow>

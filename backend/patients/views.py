@@ -1,4 +1,5 @@
 import unicodedata
+import re
 import uuid
 import json
 
@@ -69,6 +70,66 @@ STANDARD_FIELD_ALIASES = {
 	'date_d_admission': 'date_admission',
 	'dialysis_start_date': 'date_admission',
 	'presentation_date_debut_dialyse': 'date_admission',
+	'identifiant_patient': 'id_patient',
+	'age_annees': 'age',
+	'date_debut_dialyse': 'dialyse_date_debut',
+	'hemodialyse': 'dialyse_modalite_initiale',
+	'dialyse_peritoneale': 'dialyse_modalite_initiale',
+	'suivi_predialyse_mois': 'irc_duree_suivi_predialytique_mois',
+	'etiologie_mrc': 'irc_etiologie_principale',
+	'biopsie_renale': 'irc_statut_biopsie_renale',
+	'debut_dialyse_urgence': 'irc_contexte_debut_dialyse',
+	'debut_dialyse_planifie': 'irc_contexte_debut_dialyse',
+	'type_acces_initial': 'dialyse_type_acces_initial',
+	'cathetere_femoral': 'dialyse_acces_admission_femoral',
+	'cathetere_tunnellise': 'dialyse_acces_admission_tunnelise',
+	'fistule_arterioveineuse': 'dialyse_acces_admission_fav',
+	'cathetere_peritoneal': 'dialyse_acces_admission_peritoneale',
+	'information_transplantation': 'dialyse_information_transplantation_donnee',
+	'education_therapeutique': 'irc_themes_education_therapeutique',
+	'comprehension_maladie': 'irc_niveau_comprehension_patient',
+	'connaissance_therapie_substitution': 'irc_preference_therapie_renale',
+	'connaissance_pratique_dialyse': 'education_connaissance_pratique_dialyse',
+	'education_soins_acces': 'irc_themes_education_therapeutique',
+	'surveillance_hydrique_ponderale': 'irc_themes_education_therapeutique',
+	'education_regime': 'irc_themes_education_therapeutique',
+	'education_traitements_associes': 'irc_themes_education_therapeutique',
+	'education_complications': 'irc_themes_education_therapeutique',
+	'charlson': 'icc_charlson',
+	'icc_charlson': 'icc_charlson',
+	'icc (charlson)': 'icc_charlson',
+	'icc charlson': 'icc_charlson',
+	'distance_au_centre': 'demographie_distance_centre_km',
+	'seances_par_semaine': 'dialyse_seances_par_semaine',
+	'acces_a_admission_centre': 'dialyse_type_acces_initial',
+	'admission_cathetere_tunnellise': 'dialyse_acces_admission_tunnelise',
+	'admission_cathetere_femoral': 'dialyse_acces_admission_femoral',
+	'admission_fistule_arterioveineuse': 'dialyse_acces_admission_fav',
+	'admission_cathetere_peritoneal': 'dialyse_acces_admission_peritoneale',
+	'jours_entre_cathetere_et_fistule_arterioveineuse': 'dialyse_jours_entre_catheter_et_fav',
+	'fistule_arterioveineuse_creee': 'dialyse_acces_admission_fav',
+	'transplantation_renale': 'transplantation_bilan_pretransplantation',
+	'information_transplantation_donnee': 'dialyse_information_transplantation_donnee',
+	'liste_attente_transplantation': 'dialyse_statut_liste_attente_transplantation',
+	'bilan_pretransplantation': 'transplantation_bilan_pretransplantation',
+	'immunisation_transfusion_sanguine': 'immunologie_transfusion_immunisation',
+	'infection': 'complication_liste',
+	'trouble_electrolytique': 'complication_liste',
+	'evenement_cardiovasculaire': 'complication_liste',
+	'hemorragie': 'complication_liste',
+	'dysfonction_acces': 'complication_liste',
+	'crise_convulsive': 'complication_liste',
+	'jours_hospitalisation': 'complication_jours_hospitalisation',
+	'nombre_hospitalisations': 'complication_nombre_hospitalisations',
+	'changement_hd_vers_dp': 'complication_changement_modalite_dialyse',
+	'changement_dp_vers_hd': 'complication_changement_modalite_dialyse',
+	'deces': 'devenir_statut',
+	'date_deces': 'devenir_date_deces',
+	'delai_jusquau_deces_jours': 'devenir_delai_deces_jours',
+	'transplantation': 'devenir_statut',
+	'cause_deces': 'devenir_cause_deces',
+	'cause_deces_cardiaque': 'devenir_cause_deces',
+	'cause_deces_infectieuse': 'devenir_cause_deces',
 }
 
 SECTION_FIELD_ALIASES = {
@@ -83,12 +144,161 @@ SECTION_FIELD_ALIASES = {
 	'demographic_age_years': 'demographie_age_ans',
 	'demography_age': 'demographie_age_ans',
 	'demography_age_years': 'demographie_age_ans',
+	'age_annees': 'demographie_age_ans',
+	'sexe': 'demographie_sexe',
 	'gender': 'demographie_sexe',
 	'sex': 'demographie_sexe',
 	'dob': 'demographie_date_naissance',
 	'birth_date': 'demographie_date_naissance',
 	'date_of_birth': 'demographie_date_naissance',
 	'birthdate': 'demographie_date_naissance',
+	'marital_status': 'demographie_statut_matrimonial',
+	'residence_zone': 'demographie_zone_residence',
+	'distance_to_center_km': 'demographie_distance_centre_km',
+	'social_coverage': 'demographie_couverture_sociale',
+	'lifestyle': 'demographie_mode_vie',
+	'professional_status': 'demographie_statut_professionnel',
+	'education_level': 'demographie_niveau_education',
+	'connaissance_pratique_dialyse': 'irc_themes_education_therapeutique',
+	'education_soins_acces': 'irc_themes_education_therapeutique',
+	'surveillance_hydrique_ponderale': 'irc_themes_education_therapeutique',
+	'education_regime': 'irc_themes_education_therapeutique',
+	'education_traitements_associes': 'irc_themes_education_therapeutique',
+	'education_complications': 'irc_themes_education_therapeutique',
+	'smoking_status': 'demographie_tabagisme',
+	'alcohol_status': 'demographie_alcool',
+	'first_nephrology_contact_date': 'irc_date_premier_contact_nephrologique',
+	'ckd_etiology': 'irc_etiologie_principale',
+	'primary_etiology': 'irc_etiologie_principale',
+	'secondary_etiology': 'irc_etiologie_secondaire',
+	'hereditary_kidney_disease': 'irc_maladie_renale_hereditaire',
+	'family_kidney_history': 'irc_antecedents_familiaux_renaux',
+	'renal_biopsy_status': 'irc_statut_biopsie_renale',
+	'renal_biopsy_result': 'irc_resultat_biopsie_renale',
+	'known_before_dialysis': 'irc_connue_avant_dialyse',
+	'pre_dialysis_followup_months': 'irc_duree_suivi_predialytique_mois',
+	'hypertension': 'comorbidite_liste',
+	'hypertension_arterielle': 'comorbidite_liste',
+	'cardiopathie': 'comorbidite_liste',
+	'heart_disease': 'comorbidite_liste',
+	'uropathie_obstructive': 'comorbidite_liste',
+	'obstructive_uropathy': 'comorbidite_liste',
+	'gout': 'comorbidite_liste',
+	'goutte': 'comorbidite_liste',
+	'maladie_renale_hereditaire': 'irc_maladie_renale_hereditaire',
+	'hereditary_kidney_disease': 'irc_maladie_renale_hereditaire',
+	'exposition_toxique': 'comorbidite_exposition_toxique',
+	'transplantation_renale': 'devenir_date_transplantation',
+	'toxic_exposure': 'comorbidite_exposition_toxique',
+	'antecedents_medicamenteux': 'comorbidite_antecedents_medicaments_nephrotoxiques',
+	'antecedents_medicaments_nephrotoxiques': 'comorbidite_antecedents_medicaments_nephrotoxiques',
+	'nephrotoxic_drugs_history': 'comorbidite_antecedents_medicaments_nephrotoxiques',
+	'autre': 'comorbidite_liste',
+	'asthenia': 'presentation_symptomes',
+	'asthenie': 'presentation_symptomes',
+	'douleur_abdominale': 'presentation_symptomes',
+	'abdominal_pain': 'presentation_symptomes',
+	'nausees': 'presentation_symptomes',
+	'nausea': 'presentation_symptomes',
+	'prurit': 'presentation_symptomes',
+	'pruritus': 'presentation_symptomes',
+	'asymptomatique': 'presentation_symptomes',
+	'asymptomatic': 'presentation_symptomes',
+	'trouble_conscience': 'presentation_symptomes',
+	'consciousness_disorder': 'presentation_symptomes',
+	'uree_basale': 'biologie_uree_g_l',
+	'urea_baseline': 'biologie_uree_g_l',
+	'creatinine_basale': 'biologie_creatinine_mg_l',
+	'creatinine_baseline': 'biologie_creatinine_mg_l',
+	'dfge_mdrd': 'biologie_dfg_mdrd_ml_min_1_73m2',
+	'egfr_mdrd': 'biologie_dfg_mdrd_ml_min_1_73m2',
+	'hemoglobine_basale': 'biologie_hemoglobine_g_dl',
+	'hemoglobin_baseline': 'biologie_hemoglobine_g_dl',
+	'albumine_basale': 'biologie_albumine_g_l',
+	'albumin_baseline': 'biologie_albumine_g_l',
+	'potassium_basale': 'biologie_potassium_mmol_l',
+	'potassium_baseline': 'biologie_potassium_mmol_l',
+	'calcium_basale': 'biologie_calcium_corrige_mg_l',
+	'calcium_baseline': 'biologie_calcium_corrige_mg_l',
+	'phosphore_basale': 'biologie_phosphore_mg_l',
+	'phosphorus_baseline': 'biologie_phosphore_mg_l',
+	'bicarbonates_basaux': 'biologie_bicarbonates_mmol_l',
+	'bicarbonate_baseline': 'biologie_bicarbonates_mmol_l',
+	'sodium_basal': 'biologie_sodium_mmol_l',
+	'sodium_baseline': 'biologie_sodium_mmol_l',
+	'pth_basale': 'biologie_pth_pg_ml',
+	'pth_baseline': 'biologie_pth_pg_ml',
+	'ferritine_basale': 'biologie_ferritine_ng_ml',
+	'ferritin_baseline': 'biologie_ferritine_ng_ml',
+	'vitamine_d_basale': 'biologie_vitamine_d_ng_ml',
+	'vitamin_d_baseline': 'biologie_vitamine_d_ng_ml',
+	'proteinurie_basale': 'biologie_proteinurie_g_24h',
+	'proteinuria_baseline': 'biologie_proteinurie_g_24h',
+	'initial_access_type': 'dialyse_type_acces_initial',
+	'femoral_catheter': 'dialyse_acces_admission_femoral',
+	'tunneled_catheter': 'dialyse_acces_admission_tunnelise',
+	'arteriovenous_fistula': 'dialyse_acces_admission_fav',
+	'peritoneal_catheter': 'dialyse_acces_admission_peritoneale',
+	'access_at_center_admission': 'dialyse_type_acces_initial',
+	'admission_tunneled_catheter': 'dialyse_acces_admission_tunnelise',
+	'admission_femoral_catheter': 'dialyse_acces_admission_femoral',
+	'pretransplant_workup': 'transplantation_bilan_pretransplantation',
+	'blood_transfusion_immunization': 'immunologie_transfusion_immunisation',
+	'episode_date': 'presentation_date_episode',
+	'start_location': 'presentation_lieu_debut',
+	'start_reasons': 'presentation_raisons_debut',
+	'symptoms': 'presentation_symptomes',
+	'systolic_bp': 'presentation_tas_mmhg',
+	'diastolic_bp': 'presentation_tad_mmhg',
+	'heart_rate_bpm': 'presentation_frequence_cardiaque_bpm',
+	'temperature_c': 'presentation_temperature_c',
+	'weight_kg': 'presentation_poids_kg',
+	'height_cm': 'presentation_taille_cm',
+	'urine_output_ml_day': 'presentation_volume_urinaire_ml_j',
+	'sample_date': 'biologie_date_prelevement',
+	'urea_g_l': 'biologie_uree_g_l',
+	'creatinine_mg_l': 'biologie_creatinine_mg_l',
+	'hemoglobin_g_dl': 'biologie_hemoglobine_g_dl',
+	'wbc_g_l': 'biologie_leucocytes_g_l',
+	'platelets_g_l': 'biologie_plaquettes_g_l',
+	'albumin_g_l': 'biologie_albumine_g_l',
+	'crp_mg_l': 'biologie_crp_mg_l',
+	'sodium_mmol_l': 'biologie_sodium_mmol_l',
+	'potassium_mmol_l': 'biologie_potassium_mmol_l',
+	'bicarbonate_mmol_l': 'biologie_bicarbonates_mmol_l',
+	'calcium_corrected_mg_l': 'biologie_calcium_corrige_mg_l',
+	'phosphorus_mg_l': 'biologie_phosphore_mg_l',
+	'pth_pg_ml': 'biologie_pth_pg_ml',
+	'ferritin_ng_ml': 'biologie_ferritine_ng_ml',
+	'tsat_pct': 'biologie_saturation_transferrine_pct',
+	'vitamin_d_ng_ml': 'biologie_vitamine_d_ng_ml',
+	'proteinuria_g_24h': 'biologie_proteinurie_g_24h',
+	'hba1c_pct': 'biologie_hba1c_pct',
+	'dialysis_start_date': 'dialyse_date_debut',
+	'initial_dialysis_modality': 'dialyse_modalite_initiale',
+	'current_dialysis_modality': 'dialyse_modalite_actuelle',
+	'sessions_per_week': 'dialyse_seances_par_semaine',
+	'session_duration_min': 'dialyse_duree_seance_min',
+	'outcome_status': 'devenir_statut',
+	'last_followup_date': 'devenir_date_dernier_suivi',
+	'death_date': 'devenir_date_deces',
+	'cause_of_death': 'devenir_cause_deces',
+	'death': 'devenir_statut',
+	'transplantation': 'devenir_statut',
+	'urea_baseline': 'biologie_uree_g_l',
+	'creatinine_baseline': 'biologie_creatinine_mg_l',
+	'hemoglobin_baseline': 'biologie_hemoglobine_g_dl',
+	'sodium_baseline': 'biologie_sodium_mmol_l',
+	'potassium_baseline': 'biologie_potassium_mmol_l',
+	'bicarbonate_baseline': 'biologie_bicarbonates_mmol_l',
+	'calcium_baseline': 'biologie_calcium_corrige_mg_l',
+	'albumin_baseline': 'biologie_albumine_g_l',
+	'phosphorus_baseline': 'biologie_phosphore_mg_l',
+	'pth_baseline': 'biologie_pth_pg_ml',
+	'ferritin_baseline': 'biologie_ferritine_ng_ml',
+	'vitamin_d_baseline': 'biologie_vitamine_d_ng_ml',
+	'proteinuria_baseline': 'biologie_proteinurie_g_24h',
+	'cause_of_death': 'devenir_cause_deces',
 	'marital_status': 'demographie_statut_matrimonial',
 	'residence_zone': 'demographie_zone_residence',
 	'distance_to_center_km': 'demographie_distance_centre_km',
@@ -140,7 +350,7 @@ SECTION_FIELD_ALIASES = {
 	'tunneled_catheter': 'dialyse_acces_admission_tunnelise',
 	'arteriovenous_fistula': 'dialyse_acces_admission_fav',
 	'peritoneal_catheter': 'dialyse_acces_admission_peritoneale',
-	'access_at_center_admission': 'dialyse_site_acces_initial',
+	'access_at_center_admission': 'dialyse_type_acces_initial',
 	'admission_tunneled_catheter': 'dialyse_acces_admission_tunnelise',
 	'admission_femoral_catheter': 'dialyse_acces_admission_femoral',
 	'admission_arteriovenous_fistula': 'dialyse_acces_admission_fav',
@@ -227,6 +437,23 @@ SECTION_FIELD_ALIASES = {
 	'ckd_etiology_grouped': 'irc_etiologie_principale',
 }
 
+COMORBIDITE_CHOICE_MAP = {
+	'hypertension': 'hypertension_arterielle',
+	'hypertension_arterielle': 'hypertension_arterielle',
+	'cardiopathie': 'cardiopathie',
+	'uropathie_obstructive': 'uropathie_obstructive',
+	'goutte': 'goutte',
+	'gout': 'goutte',
+	'maladie_renale_hereditaire': 'maladie_renale_hereditaire',
+	'hereditary_kidney_disease': 'maladie_renale_hereditaire',
+	'exposition_toxique': 'exposition_toxique',
+	'toxic_exposure': 'exposition_toxique',
+	'antecedents_medicamenteux': 'antecedent_nephrotoxiques',
+	'nephrotoxic_drugs_history': 'antecedent_nephrotoxiques',
+	'antecedent_nephrotoxiques': 'antecedent_nephrotoxiques',
+	'autre': 'autre',
+}
+
 ENGLISH_SECTION_PREFIX_MAP = {
 	'demographic_': 'demographie_',
 	'demographics_': 'demographie_',
@@ -285,6 +512,7 @@ SECTION_SUFFIX_ALIASES = {
 	'last_followup_date': 'date_dernier_suivi',
 	'death_date': 'date_deces',
 	'cause_of_death': 'cause_deces',
+	'list': 'liste',
 }
 
 SECTION_PREFIX_MAP = {
@@ -749,6 +977,84 @@ def normalize_section_value(section_key, value, source_key=None):
 	return value
 
 
+def append_comorbidite_list(payload, source_key, value):
+	if not _is_truthy(value):
+		return
+
+	choice = COMORBIDITE_CHOICE_MAP.get(normalize_header(source_key))
+	if not choice:
+		return
+
+	comorbidite_data = payload.setdefault('comorbidite_data', {})
+	current_value = comorbidite_data.get('comorbidite_liste')
+	if current_value is None:
+		values = []
+	elif isinstance(current_value, list):
+		values = current_value
+	elif isinstance(current_value, str):
+		values = [current_value] if current_value else []
+	else:
+		try:
+			values = list(current_value)
+		except Exception:
+			values = [current_value]
+
+	if choice not in values:
+		values.append(choice)
+
+	comorbidite_data['comorbidite_liste'] = values
+
+
+def append_presentation_symptomes(payload, source_key, value):
+	if not _is_truthy(value):
+		return
+
+	presentation_data = payload.setdefault('presentation_data', {})
+	current_value = presentation_data.get('presentation_symptomes')
+	if current_value is None:
+		values = []
+	elif isinstance(current_value, list):
+		values = current_value
+	elif isinstance(current_value, str):
+		values = [current_value] if current_value else []
+	else:
+		try:
+			values = list(current_value)
+		except Exception:
+			values = [current_value]
+
+	label = normalize_header(source_key)
+	if label not in values:
+		values.append(label)
+
+	presentation_data['presentation_symptomes'] = values
+
+
+def append_education_themes(payload, source_key, value):
+	if not _is_truthy(value):
+		return
+
+	irc_data = payload.setdefault('irc_data', {})
+	current_value = irc_data.get('irc_themes_education_therapeutique')
+	if current_value is None:
+		values = []
+	elif isinstance(current_value, list):
+		values = current_value
+	elif isinstance(current_value, str):
+		values = [current_value] if current_value else []
+	else:
+		try:
+			values = list(current_value)
+		except Exception:
+			values = [current_value]
+
+	label = normalize_header(source_key)
+	if label not in values:
+		values.append(label)
+
+	irc_data['irc_themes_education_therapeutique'] = values
+
+
 def is_schema_template_sheet(worksheet):
 	if worksheet.max_row < 2:
 		return False
@@ -899,6 +1205,16 @@ def build_patient_payload(row):
 				if resolved_section_key.startswith(prefix):
 					section_field = section_bucket
 					break
+
+		if resolved_section_key == 'comorbidite_liste' and normalized != 'comorbidite_liste':
+			append_comorbidite_list(payload, normalized, value)
+			continue
+		if resolved_section_key == 'presentation_symptomes' and normalized != 'presentation_symptomes':
+			append_presentation_symptomes(payload, normalized, value)
+			continue
+		if resolved_section_key == 'irc_themes_education_therapeutique' and normalized != 'irc_themes_education_therapeutique':
+			append_education_themes(payload, normalized, value)
+			continue
 
 		# Keep section-specific keys filled so Classeur1 columns always get their values.
 		if section_field:

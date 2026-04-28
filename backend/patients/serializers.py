@@ -58,6 +58,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'comorbidite_statut_diabete',
             'comorbidite_liste',
             'comorbidite_autre',
+            'icc_charlson',
             'comorbidite_exposition_toxique',
             'comorbidite_antecedents_medicaments_nephrotoxiques',
             'presentation_date_episode',

@@ -55,6 +55,7 @@ class Patient(models.Model):
 	comorbidite_statut_diabete = models.TextField(blank=True)
 	comorbidite_liste = models.TextField(blank=True)
 	comorbidite_autre = models.TextField(blank=True)
+	icc_charlson = models.TextField(blank=True)
 	comorbidite_exposition_toxique = models.TextField(blank=True)
 	comorbidite_antecedents_medicaments_nephrotoxiques = models.TextField(blank=True)
 	presentation_date_episode = models.TextField(blank=True)
