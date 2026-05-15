@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Django / environment
+*.sqlite3
+*.log
+env/
+.env
+backend/.env
+
+# VSCode
+.vscode/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.swp
+*.tmp
