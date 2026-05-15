@@ -1,0 +1,1145 @@
+import unicodedata
+import re
+import uuid
+import json
+import os
+
+import pandas as pd
+from django.db import connection
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.http import HttpResponse
+from openpyxl import Workbook, load_workbook
+from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from users.permissions import IsAdminOrChefService
+
+from .models import Patient, PatientFormField, PatientFormTemplate
+from .serializers import PatientFormTemplateSerializer, PatientSerializer
+
+
+# ============================================================
+# FONCTIONS UTILITAIRES DE BASE
+# ============================================================
+
+def normalize_header(value):
+    text = unicodedata.normalize('NFKD', str(value).strip().lower())
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    return text.strip('_')
+
+
+def convert_excel_value(value):
+    if pd.isna(value):
+        return None
+
+    if hasattr(value, 'item') and not isinstance(value, (str, bytes)):
+        try:
+            value = value.item()
+        except Exception:
+            pass
+
+    if hasattr(value, 'to_pydatetime'):
+        return value.to_pydatetime().date().isoformat()
+
+    if hasattr(value, 'date') and not isinstance(value, str):
+        try:
+            return value.date().isoformat()
+        except Exception:
+            return str(value)
+
+    if isinstance(value, (int, float)) and float(value).is_integer():
+        return int(value)
+
+    if hasattr(value, 'isoformat') and not isinstance(value, str):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+
+    return value
+
+
+def normalize_type(value):
+    normalized = normalize_header(value).replace('_', ' ')
+    TYPE_MAP = {
+        'texte libre court': 'text_short',
+        'texte libre long': 'text_long',
+        'liste a choix unique': 'single_choice',
+        'liste a choix multiple': 'multiple_choice',
+        'selecteur de date': 'date',
+        'nombre entier': 'integer',
+        'nombre decimal': 'decimal',
+        'oui/non': 'boolean',
+        'genere automatiquement': 'auto',
+    }
+    return TYPE_MAP.get(normalized, 'text_short')
+
+
+def parse_flexible_date(value):
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    parsed = parse_date(text)
+    if parsed:
+        return parsed.isoformat()
+
+    for dayfirst in [True, False]:
+        try:
+            dt = pd.to_datetime(text, errors='coerce', dayfirst=dayfirst)
+            if pd.notna(dt):
+                return dt.date().isoformat()
+        except Exception:
+            continue
+
+    return None
+
+
+def normalize_age_value(value):
+    if value in [None, '']:
+        return None
+
+    try:
+        age_value = int(float(str(value).strip()))
+        if age_value < 0:
+            return None
+        return age_value
+    except Exception:
+        return None
+
+
+def derive_age_from_date_of_birth(date_iso):
+    if not date_iso:
+        return None
+
+    birth_date = parse_date(str(date_iso))
+    if not birth_date:
+        return None
+
+    today = timezone.localdate()
+    age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    return age if age >= 0 else None
+
+
+def derive_date_of_birth_from_age(age_value):
+    normalized_age = normalize_age_value(age_value)
+    if normalized_age is None:
+        return None
+    target_year = timezone.localdate().year - normalized_age
+    return f"{target_year}-01-01"
+
+
+def normalize_sex_values(value):
+    if value is None:
+        return None, None
+
+    value_str = str(value).strip().lower()
+    
+    if value_str in ['1', '1.0']:
+        return 'M', 'homme'
+    if value_str in ['0', '0.0']:
+        return 'F', 'femme'
+    
+    normalized = normalize_header(value_str)
+    if normalized in ['m', 'male', 'masculin', 'homme', 'man']:
+        return 'M', 'homme'
+    if normalized in ['f', 'female', 'feminin', 'femme', 'woman']:
+        return 'F', 'femme'
+    if normalized in ['i', 'intersex', 'intersexe']:
+        return 'O', 'intersexe'
+    if normalized in ['unknown', 'inconnu', 'na', 'n_a', 'none', 'null', '', '9', '9.0']:
+        return 'O', 'inconnu'
+    return 'O', 'inconnu'
+
+
+def decode_numeric_value(column_name, value):
+    """Convertit les valeurs numériques codées en valeurs textuelles"""
+    if value is None or value == '':
+        return value
+    
+    etiologie_map = {
+        1: 'nephropathie_diabetique',
+        2: 'nephropathie_indeterminee',
+        3: 'vascularite_anca',
+        4: 'maladie_renale_polykystique',
+        5: 'nephroangiosclerose_hypertensive',
+        6: 'uropathie_obstructive',
+        7: 'nephropathie_lupique',
+        8: 'glomerulonephrite_membraneuse',
+        9: 'nephropathie_a_iga',
+        10: 'lgm_hsf',
+        11: 'amylose_myelome',
+        12: 'gn_crescentique',
+        13: 'syndrome_hemolytique_et_uremique',
+        14: 'glomerulopathie_c3',
+        15: 'necrose_corticale'
+    }
+    
+    if column_name == 'etiologie_mrc':
+        try:
+            return etiologie_map.get(int(value), value)
+        except (ValueError, TypeError):
+            return value
+    
+    if column_name in ['hypertension', 'cardiopathie', 'hemodialyse', 'dialyse_peritoneale', 
+                       'debut_dialyse_urgence', 'debut_dialyse_planifie', 'cause_deces_cardiaque', 
+                       'cause_deces_infectieuse']:
+        try:
+            val_int = int(float(value))
+            return 1 if val_int == 1 else 0
+        except (ValueError, TypeError):
+            return value
+    
+    return value
+
+
+def extract_charlson_score(value):
+    """Extrait le score Charlson d'une valeur potentiellement mal formatée"""
+    if value is None or value == '':
+        return None
+    
+    str_value = str(value).strip()
+    
+    # Si c'est déjà un nombre simple
+    try:
+        return int(float(str_value))
+    except (ValueError, TypeError):
+        pass
+    
+    # Chercher tous les nombres dans la chaîne (ex: "=3", "3.0", "3 ans")
+    numbers = re.findall(r'\d+', str_value)
+    if numbers:
+        return int(numbers[0])
+    
+    return None
+
+
+def _is_truthy(value):
+    if isinstance(value, bool):
+        return value
+    normalized = normalize_header(value)
+    return normalized in ['1', 'true', 'yes', 'oui', 'y']
+
+
+def _is_falsey(value):
+    if isinstance(value, bool):
+        return not value
+    normalized = normalize_header(value)
+    return normalized in ['0', 'false', 'no', 'non', 'aucun', 'none', 'null', 'na', 'n_a', '']
+
+
+def _pg_quote_identifier(value):
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _pg_quote_literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+# ============================================================
+# CHARGEMENT AUTOMATIQUE DU MAPPING DEPUIS column_mapping.json
+# ============================================================
+
+def load_column_mapping():
+    """Charge le mapping depuis le fichier JSON"""
+    mapping_file = os.path.join(os.path.dirname(__file__), 'column_mapping.json')
+    try:
+        with open(mapping_file, 'r', encoding='utf-8') as f:
+            mapping_list = json.load(f)
+        
+        column_mapping = {}
+        for item in mapping_list:
+            main_key = normalize_header(item['main'])
+            platform_key = normalize_header(item['platform'])
+            transformation = item['transformation']
+            
+            if transformation == 'direct':
+                transform_type = 'direct'
+            elif transformation == 'calcul (age → date naissance estimée)':
+                transform_type = 'calcul_age_to_birthdate'
+            elif transformation in ['fusion (urgence/planifié → contexte)', 'fusion (hd/dp → modalité)', 'fusion (cardiaque/infectieux → cause)', 'fusion (hd→dp / dp→hd → changement)']:
+                transform_type = transformation
+            elif 'fusion' in transformation or 'inclus dans' in transformation:
+                transform_type = transformation
+            else:
+                transform_type = 'direct'
+            
+            column_mapping[main_key] = {
+                'platform': platform_key,
+                'type': transform_type,
+                'original_main': item['main'],
+                'original_platform': item['platform']
+            }
+        
+        return column_mapping
+    except Exception as e:
+        print(f"Erreur chargement mapping: {e}")
+        return get_default_mapping()
+
+
+def get_default_mapping():
+    """Mapping par défaut"""
+    return {
+        'identifiant_patient': {'platform': 'id_patient', 'type': 'direct'},
+        'sexe': {'platform': 'demographie_sexe', 'type': 'direct'},
+        'age_annees': {'platform': 'demographie_date_naissance', 'type': 'calcul_age_to_birthdate'},
+        'distance_au_centre': {'platform': 'demographie_distance_centre_km', 'type': 'direct'},
+        'suivi_predialyse_mois': {'platform': 'irc_duree_suivi_predialytique_mois', 'type': 'direct'},
+        'etiologie_mrc': {'platform': 'irc_etiologie_principale', 'type': 'direct'},
+        'charlson': {'platform': 'icc_charlson', 'type': 'direct'},
+        'Charlson': {'platform': 'icc_charlson', 'type': 'direct'},
+        'icc_charlson': {'platform': 'icc_charlson', 'type': 'direct'},
+        'hypertension': {'platform': 'comorbidite_liste', 'type': 'fusion (valeurs multiples → liste)'},
+        'cardiopathie': {'platform': 'comorbidite_liste', 'type': 'fusion (valeurs multiples → liste)'},
+        'hemodialyse': {'platform': 'dialyse_modalite_initiale', 'type': 'fusion (hd/dp → modalité)'},
+        'dialyse_peritoneale': {'platform': 'dialyse_modalite_initiale', 'type': 'fusion (hd/dp → modalité)'},
+        'debut_dialyse_urgence': {'platform': 'irc_contexte_debut_dialyse', 'type': 'fusion (urgence/planifié → contexte)'},
+        'debut_dialyse_planifie': {'platform': 'irc_contexte_debut_dialyse', 'type': 'fusion (urgence/planifié → contexte)'},
+        'deces': {'platform': 'devenir_statut', 'type': 'inclus dans statut devenir'},
+        'cause_deces_cardiaque': {'platform': 'devenir_cause_deces', 'type': 'fusion (cardiaque/infectieux → cause)'},
+        'cause_deces_infectieuse': {'platform': 'devenir_cause_deces', 'type': 'fusion (cardiaque/infectieux → cause)'},
+    }
+
+
+# Charger le mapping au démarrage
+COLUMN_MAPPING = load_column_mapping()
+
+SECTION_PREFIX_MAP = {
+    'demographie_': 'demographie_data',
+    'irc_': 'irc_data',
+    'comorbidite_': 'comorbidite_data',
+    'presentation_': 'presentation_data',
+    'biologie_': 'biologie_data',
+    'imagerie_': 'imagerie_data',
+    'dialyse_': 'dialyse_data',
+    'qualite_': 'qualite_data',
+    'complication_': 'complication_data',
+    'traitement_': 'traitement_data',
+    'devenir_': 'devenir_data',
+}
+
+TEMPLATE_KEYWORDS = {
+    'texte libre court',
+    'texte libre long',
+    'liste a choix unique',
+    'liste a choix multiple',
+    'selecteur de date',
+    'nombre entier',
+    'oui/non',
+    'genere automatiquement',
+}
+
+FIXED_CLASSEUR_TEMPLATE_NAMES = [
+    'template',
+    'template_patients_hd',
+    'plateform_donnees_complete',
+    'classeur1',
+    'Main',
+]
+
+AUTO_INCREMENT_FIELD_PREFIX = {
+    'id_patient': 'PAT',
+    'id_enregistrement_source': 'SRC',
+}
+
+POSTGRES_MODEL_FIELD_MAP = {
+    'id_patient': 'id_patient',
+    'id_enregistrement_source': 'id_enregistrement_source',
+    'id_site': 'id_site',
+    'statut_inclusion': 'statut_inclusion',
+    'statut_consentement': 'statut_consentement',
+    'utilisateur_saisie': 'utilisateur_saisie',
+    'derniere_mise_a_jour': 'derniere_mise_a_jour',
+    'date_evaluation_initiale': 'date_evaluation_initiale',
+    'nom': 'nom',
+    'prenom': 'prenom',
+    'age': 'age',
+    'sexe': 'sexe',
+    'maladie': 'maladie',
+    'telephone': 'telephone',
+    'adresse': 'adresse',
+    'date_naissance': 'date_naissance',
+    'date_admission': 'date_admission',
+}
+
+POSTGRES_SECTION_BUCKETS = [
+    ('demographie_', 'demographie_data'),
+    ('irc_', 'irc_data'),
+    ('comorbidite_', 'comorbidite_data'),
+    ('presentation_', 'presentation_data'),
+    ('biologie_', 'biologie_data'),
+    ('imagerie_', 'imagerie_data'),
+    ('dialyse_', 'dialyse_data'),
+    ('qualite_', 'qualite_data'),
+    ('complication_', 'complication_data'),
+    ('traitement_', 'traitement_data'),
+    ('devenir_', 'devenir_data'),
+]
+
+
+def refresh_postgres_flat_view(template=None):
+    if template is None:
+        template = PatientFormTemplate.objects.filter(name__iexact='template').order_by('-id').first()
+        if template is None:
+            template = PatientFormTemplate.objects.order_by('-id').first()
+
+    if template is None:
+        return
+
+    keys = [
+        key for key in template.fields.order_by('order', 'id').values_list('key', flat=True)
+        if key and not key.startswith('unnamed')
+    ]
+    if not keys:
+        return
+
+    fixed_keys = [
+        'id_patient', 'nom', 'prenom', 'age', 'sexe', 'maladie',
+        'telephone', 'adresse', 'date_naissance', 'date_admission',
+        'id_enregistrement_source', 'id_site', 'statut_inclusion',
+        'statut_consentement', 'date_evaluation_initiale',
+        'utilisateur_saisie', 'derniere_mise_a_jour'
+    ]
+
+    select_parts = ['p.id AS id']
+    for key in fixed_keys:
+        if key in POSTGRES_MODEL_FIELD_MAP:
+            select_parts.append(f"p.{POSTGRES_MODEL_FIELD_MAP[key]} AS {_pg_quote_identifier(key)}")
+
+    for key in keys:
+        if key in fixed_keys:
+            continue
+        if key in POSTGRES_MODEL_FIELD_MAP:
+            expr = f"p.{POSTGRES_MODEL_FIELD_MAP[key]}"
+        else:
+            bucket = None
+            for prefix, column_name in POSTGRES_SECTION_BUCKETS:
+                if key.startswith(prefix):
+                    bucket = column_name
+                    break
+
+            if bucket:
+                expr = f"p.{bucket} ->> {_pg_quote_literal(key)}"
+            else:
+                expr = f"p.extra_data ->> {_pg_quote_literal(key)}"
+
+        select_parts.append(f"{expr} AS {_pg_quote_identifier(key)}")
+
+    sql = (
+        'CREATE OR REPLACE VIEW public.patients_plateforme_flat AS '
+        'SELECT ' + ', '.join(select_parts) + ' FROM patients_patient p'
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+
+
+def is_schema_template_sheet(worksheet):
+    if worksheet.max_row < 2:
+        return False
+
+    type_cells = [worksheet.cell(2, col_index).value for col_index in range(1, worksheet.max_column + 1)]
+    normalized_types = {
+        normalize_header(cell).replace('_', ' ')
+        for cell in type_cells
+        if cell is not None and str(cell).strip()
+    }
+    return bool(normalized_types.intersection(TEMPLATE_KEYWORDS))
+
+
+def create_or_update_template(worksheet, source_file_name):
+    template_name = (worksheet.title if worksheet else None) or 'Patient Schema'
+    template, _ = PatientFormTemplate.objects.update_or_create(
+        name=template_name,
+        defaults={
+            'source_file_name': source_file_name or template_name,
+            'sheet_name': worksheet.title if worksheet else template_name,
+        },
+    )
+    return template
+
+
+def parse_schema_from_template_sheet(worksheet, source_file_name):
+    template = create_or_update_template(worksheet, source_file_name)
+    template.fields.all().delete()
+
+    created_fields = []
+    for column_index in range(1, worksheet.max_column + 1):
+        header = worksheet.cell(1, column_index).value
+        type_label = worksheet.cell(2, column_index).value
+        if not header:
+            continue
+
+        choices = []
+        for row_index in range(3, worksheet.max_row + 1):
+            value = worksheet.cell(row_index, column_index).value
+            if value is not None and str(value).strip():
+                choices.append(str(value).strip())
+
+        field_type = normalize_type(type_label)
+        created_fields.append(
+            PatientFormField(
+                template=template,
+                key=normalize_header(header),
+                label=str(header).strip(),
+                field_type=field_type,
+                order=column_index,
+                choices=choices,
+                source_hint=str(type_label or ''),
+                is_required=field_type not in ['auto'],
+            )
+        )
+
+    PatientFormField.objects.bulk_create(created_fields)
+    try:
+        refresh_postgres_flat_view(template)
+    except Exception:
+        pass
+    return template, len(created_fields)
+
+
+def upsert_template_from_headers(headers, worksheet, source_file_name, create_fields=True):
+    template = None
+    for template_name in FIXED_CLASSEUR_TEMPLATE_NAMES:
+        template = (
+            PatientFormTemplate.objects.filter(name__iexact=template_name).order_by('-id').first()
+            or PatientFormTemplate.objects.filter(sheet_name__iexact=template_name).order_by('-id').first()
+        )
+        if template:
+            break
+
+    if template is None:
+        template = create_or_update_template(worksheet, source_file_name)
+    else:
+        if source_file_name:
+            template.source_file_name = source_file_name
+        if worksheet and getattr(worksheet, 'title', None):
+            template.sheet_name = worksheet.title
+        template.save(update_fields=['source_file_name', 'sheet_name'])
+
+    if not create_fields:
+        try:
+            refresh_postgres_flat_view(template)
+        except Exception:
+            pass
+        return template
+
+    existing_fields = {field.key: field for field in template.fields.all()}
+
+    for index, header in enumerate(headers, start=1):
+        if not header:
+            continue
+
+        header_str = str(header).strip()
+        if not header_str or header_str.lower().startswith('unnamed'):
+            continue
+
+        key = normalize_header(header_str)
+        if not key or key.startswith('unnamed') or key in existing_fields:
+            continue
+
+        PatientFormField.objects.create(
+            template=template,
+            key=key,
+            label=str(header).strip(),
+            field_type='text_short',
+            order=index,
+            choices=[],
+            source_hint='auto_detected_from_data_import',
+            is_required=False,
+        )
+
+    try:
+        refresh_postgres_flat_view(template)
+    except Exception:
+        pass
+
+    return template
+
+
+def build_patient_payload(row):
+    # DEBUG: Afficher les noms de colonnes une seule fois
+    if not hasattr(build_patient_payload, '_cols_printed'):
+        print("=== COLONNES DU FICHIER EXCEL ===")
+        for i, col in enumerate(row.keys()):
+            print(f'  {i}: "{col}"')
+        build_patient_payload._cols_printed = True
+    
+    payload = {'extra_data': {}}
+    
+    # Initialiser les structures
+    payload.setdefault('demographie_data', {})
+    payload.setdefault('irc_data', {})
+    payload.setdefault('comorbidite_data', {})
+    payload.setdefault('presentation_data', {})
+    payload.setdefault('biologie_data', {})
+    payload.setdefault('dialyse_data', {})
+    payload.setdefault('complication_data', {})
+    payload.setdefault('devenir_data', {})
+    
+    comorbidite_list = []
+    presentation_list = []
+    complication_list = []
+    education_list = []
+    
+    contexte_dialyse = None
+    modalite_dialyse = None
+    date_transplantation = None
+    cause_deces_value = None
+    deces_statut = None
+    changement_modalite = False
+    age_value = None
+    age_column_found = False
+
+    # PARCOURIR TOUTES LES COLONNES
+    for column_name, raw_value in row.items():
+        value = convert_excel_value(raw_value)
+        if value is None:
+            continue
+        
+        value = decode_numeric_value(column_name, value)
+        normalized = normalize_header(column_name)
+        
+        # === DÉTECTION DE L'ÂGE ===
+        if not age_column_found and ('age' in normalized or normalized == 'ans' or normalized == 'years' or normalized == 'age_annees'):
+            age_value = normalize_age_value(value)
+            if age_value is not None and age_value > 0 and age_value < 120:
+                payload['age'] = age_value
+                payload['demographie_data']['demographie_age_ans'] = age_value
+                date_estimee = derive_date_of_birth_from_age(age_value)
+                if date_estimee:
+                    payload['demographie_data']['demographie_date_naissance'] = date_estimee
+                age_column_found = True
+                print(f"Âge détecté: '{column_name}' = {age_value} ans")
+            continue
+        
+        # ============================================================
+        # DÉTECTION CHARLSON - CORRECTION FINALE
+        # ============================================================
+        col_name_lower = str(column_name).lower().strip()
+        
+        # Vérifier si c'est une colonne Charlson (peu importe la casse)
+        is_charlson = False
+        
+        # Détection par nom exact
+        if col_name_lower in ['charlson', 'icc_charlson', 'icccharlson', 'score_charlson']:
+            is_charlson = True
+        
+        # Détection par nom original (avec majuscules)
+        if str(column_name).strip() in ['Charlson', 'ICC_Charlson', 'ICC_CHARLSON']:
+            is_charlson = True
+        
+        # Détection partielle (contient "charlson")
+        if 'charlson' in col_name_lower:
+            is_charlson = True
+        
+        if is_charlson:
+            charlson_val = extract_charlson_score(value)
+            if charlson_val is not None:
+                payload['icc_charlson'] = str(charlson_val)
+                print(f"🔥🔥🔥 CHARLSON CAPTURÉ ! 🔥🔥🔥")
+                print(f"   Colonne: '{column_name}'")
+                print(f"   Valeur brute: '{raw_value}'")
+                print(f"   Score extrait: {charlson_val}")
+                print(f"   payload['icc_charlson'] = '{payload['icc_charlson']}'")
+            else:
+                print(f"⚠️ Colonne Charlson trouvée mais valeur non extraite: '{raw_value}'")
+        
+        # === MAPPING STANDARD ===
+        mapping = COLUMN_MAPPING.get(normalized)
+        
+        if mapping:
+            platform_field = mapping['platform']
+            transform_type = mapping['type']
+            
+            if transform_type == 'direct':
+                section_target = None
+                for prefix, section_bucket in SECTION_PREFIX_MAP.items():
+                    if platform_field.startswith(prefix):
+                        section_target = section_bucket
+                        break
+                
+                if section_target:
+                    payload[section_target][platform_field] = value
+                else:
+                    payload[platform_field] = value
+            
+            elif transform_type == 'calcul_age_to_birthdate':
+                if not age_column_found:
+                    age_value = normalize_age_value(value)
+                    if age_value is not None and age_value > 0 and age_value < 120:
+                        payload['age'] = age_value
+                        payload['demographie_data']['demographie_age_ans'] = age_value
+                        date_estimee = derive_date_of_birth_from_age(age_value)
+                        if date_estimee:
+                            payload['demographie_data']['demographie_date_naissance'] = date_estimee
+                        age_column_found = True
+            
+            elif transform_type == 'fusion (urgence/planifié → contexte)':
+                if _is_truthy(value):
+                    contexte_dialyse = 'debut_en_urgence' if 'urgence' in normalized else 'debut_planifie'
+            
+            elif transform_type == 'fusion (hd/dp → modalité)':
+                if _is_truthy(value):
+                    modalite_dialyse = 'hemodialyse' if 'hemodialyse' in normalized else 'dialyse_peritoneale'
+            
+            elif transform_type == 'partiel (oui/non → date)':
+                if _is_truthy(value):
+                    date_transplantation = timezone.now().date().isoformat()
+            
+            elif transform_type == 'fusion (valeurs multiples → liste)' and platform_field == 'comorbidite_liste':
+                if _is_truthy(value):
+                    label = normalized.replace('_', ' ')
+                    if label not in comorbidite_list:
+                        comorbidite_list.append(label)
+                        print(f"Comorbidité: {label}")
+            
+            elif 'symptome' in transform_type.lower() or (transform_type == 'fusion (valeurs multiples → liste)' and platform_field == 'presentation_symptomes'):
+                if _is_truthy(value):
+                    label = normalized.replace('_', ' ')
+                    if label not in presentation_list:
+                        presentation_list.append(label)
+            
+            elif 'complication' in transform_type.lower() or (transform_type == 'fusion (valeurs multiples → liste)' and platform_field == 'complication_liste'):
+                if _is_truthy(value):
+                    label = normalized.replace('_', ' ')
+                    if label not in complication_list:
+                        complication_list.append(label)
+            
+            elif 'inclus dans thèmes éducation' in transform_type:
+                if _is_truthy(value):
+                    label = normalized.replace('_', ' ')
+                    if label not in education_list:
+                        education_list.append(label)
+            
+            elif transform_type == 'fusion (cardiaque/infectieux → cause)':
+                if _is_truthy(value):
+                    if 'cardiaque' in normalized:
+                        cause_deces_value = 'cardiovasculaire'
+                    elif 'infectieuse' in normalized:
+                        cause_deces_value = 'infection'
+            
+            elif transform_type == 'inclus dans statut devenir' and platform_field == 'devenir_statut':
+                deces_statut = value
+            
+            elif 'changement' in transform_type.lower():
+                if _is_truthy(value):
+                    changement_modalite = True
+        else:
+            payload['extra_data'][normalized] = value
+    
+    # Appliquer les fusions
+    if comorbidite_list:
+        payload['comorbidite_data']['comorbidite_liste'] = ', '.join(comorbidite_list)
+    
+    if presentation_list:
+        payload['presentation_data']['presentation_symptomes'] = ', '.join(presentation_list)
+    
+    if complication_list:
+        payload['complication_data']['complication_liste'] = ', '.join(complication_list)
+    
+    if education_list:
+        payload['irc_data']['irc_themes_education_therapeutique'] = ', '.join(education_list)
+    
+    if contexte_dialyse:
+        payload['irc_data']['irc_contexte_debut_dialyse'] = contexte_dialyse
+    
+    if modalite_dialyse:
+        payload['dialyse_data']['dialyse_modalite_initiale'] = modalite_dialyse
+    
+    if date_transplantation:
+        payload['devenir_data']['devenir_date_transplantation'] = date_transplantation
+    
+    if cause_deces_value:
+        payload['devenir_data']['devenir_cause_deces'] = cause_deces_value
+    
+    if deces_statut is not None:
+        payload['devenir_data']['devenir_statut'] = 'decede' if _is_truthy(deces_statut) else 'vivant_sous_dialyse'
+    
+    if changement_modalite:
+        payload['complication_data']['complication_changement_modalite_dialyse'] = 'oui'
+    
+    # Traitement du sexe
+    if 'demographie_sexe' in payload['demographie_data']:
+        dem_sexe = payload['demographie_data']['demographie_sexe']
+        patient_sex, demo_sex = normalize_sex_values(dem_sexe)
+        if patient_sex:
+            payload['sexe'] = patient_sex
+        if demo_sex:
+            payload['demographie_data']['demographie_sexe'] = demo_sex
+    
+    # RÉCAPITULATIF FINAL
+    if age_column_found:
+        print(f"✓ Âge: {age_value} ans")
+    
+    if 'icc_charlson' in payload:
+        print(f"✅✅✅ CHARLSON DANS LE PAYLOAD: {payload['icc_charlson']} ✅✅✅")
+    else:
+        print("⚠️ Aucune colonne Charlson trouvée dans ce fichier")
+    
+    return payload
+
+
+def ensure_required_identity_fields(payload):
+    extra_data = payload.get('extra_data') or {}
+    identifier = payload.get('id_patient') or extra_data.get('id_patient')
+
+    if not payload.get('id_patient') and identifier:
+        payload['id_patient'] = str(identifier)
+
+    nom_value = payload.get('nom')
+    if nom_value is None or str(nom_value).strip() == '':
+        payload['nom'] = 'Import_Automatique'
+
+    prenom_value = payload.get('prenom')
+    if prenom_value is None or str(prenom_value).strip() == '':
+        payload['prenom'] = f"Patient_{payload.get('id_patient', '000')}"
+
+    payload['extra_data'] = extra_data
+    return payload
+
+
+def _extract_numeric_suffix(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    digits = ''.join(character for character in text if character.isdigit())
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def generate_next_incremental_identifier(model_field, prefix):
+    max_number = 0
+    for current_value in Patient.objects.values_list(model_field, flat=True):
+        numeric_value = _extract_numeric_suffix(current_value)
+        if numeric_value and numeric_value > max_number:
+            max_number = numeric_value
+    next_number = max_number + 1
+    return f"{prefix}{next_number:06d}"
+
+
+def generate_next_numeric_patient_id(auto_increment_state=None):
+    if auto_increment_state is not None:
+        auto_increment_state['id_patient'] = auto_increment_state.get('id_patient', 0) + 1
+        return str(auto_increment_state['id_patient'])
+    max_number = 0
+    for current_value in Patient.objects.values_list('id_patient', flat=True):
+        numeric_value = _extract_numeric_suffix(current_value)
+        if numeric_value and numeric_value > max_number:
+            max_number = numeric_value
+    return str(max_number + 1)
+
+
+def initialize_auto_increment_state():
+    state = {}
+    for model_field in AUTO_INCREMENT_FIELD_PREFIX:
+        max_number = 0
+        for current_value in Patient.objects.values_list(model_field, flat=True):
+            numeric_value = _extract_numeric_suffix(current_value)
+            if numeric_value and numeric_value > max_number:
+                max_number = numeric_value
+        state[model_field] = max_number
+    return state
+
+
+def resolve_entry_user_label(user):
+    if not user or not getattr(user, 'is_authenticated', False):
+        return 'system_import'
+    for attr in ['username', 'email']:
+        value = getattr(user, attr, None)
+        if value:
+            return str(value)
+    return str(getattr(user, 'id', 'system_import'))
+
+
+def ensure_incremental_identifiers(payload, auto_increment_state=None, force_generated=False):
+    if force_generated:
+        payload['id_patient'] = generate_next_numeric_patient_id(auto_increment_state=auto_increment_state)
+        if auto_increment_state is not None:
+            auto_increment_state['id_enregistrement_source'] = auto_increment_state.get('id_enregistrement_source', 0) + 1
+            payload['id_enregistrement_source'] = f"{AUTO_INCREMENT_FIELD_PREFIX['id_enregistrement_source']}{auto_increment_state['id_enregistrement_source']:06d}"
+        else:
+            payload['id_enregistrement_source'] = generate_next_incremental_identifier(
+                'id_enregistrement_source',
+                AUTO_INCREMENT_FIELD_PREFIX['id_enregistrement_source'],
+            )
+        return payload
+    if not payload.get('id_patient'):
+        payload['id_patient'] = generate_next_numeric_patient_id(auto_increment_state=auto_increment_state)
+    return payload
+
+
+def apply_automatic_schema_fields(payload, auto_increment_state=None, current_user=None):
+    template = PatientFormTemplate.objects.order_by('-id').first()
+    if not template:
+        return payload
+    extra_data = payload.get('extra_data') or {}
+    for field in template.fields.filter(field_type='auto'):
+        if field.key in ['id_patient', 'id_enregistrement_source']:
+            continue
+    payload['extra_data'] = extra_data
+    
+    # Ajouter les champs requis pour l'affichage
+    if 'utilisateur_saisie' not in payload:
+        payload['utilisateur_saisie'] = resolve_entry_user_label(current_user)
+    if 'derniere_mise_a_jour' not in payload:
+        payload['derniere_mise_a_jour'] = timezone.now().isoformat()
+    if 'date_evaluation_initiale' not in payload:
+        payload['date_evaluation_initiale'] = timezone.now().date().isoformat()
+    
+    return payload
+
+
+# ============================================================
+# VUES API
+# ============================================================
+
+class PatientListCreateView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def get_queryset(self, request):
+        queryset = Patient.objects.all()
+        search = request.query_params.get('search', '').strip()
+        id_patient = request.query_params.get('id_patient', '').strip()
+        sexe = request.query_params.get('sexe', '').strip()
+        age_min = request.query_params.get('age_min', '').strip()
+        age_max = request.query_params.get('age_max', '').strip()
+        date_naissance = request.query_params.get('date_naissance', '').strip()
+        statut_inclusion = request.query_params.get('statut_inclusion', '').strip()
+        infection = request.query_params.get('infection', '').strip().lower()
+        hemorrhage = request.query_params.get('hemorrhage', '').strip().lower()
+        avf_created = request.query_params.get('avf_created', '').strip().lower()
+
+        if search:
+            queryset = queryset.filter(
+                Q(nom__icontains=search) | Q(prenom__icontains=search) |
+                Q(id_patient__icontains=search) | Q(maladie__icontains=search) |
+                Q(telephone__icontains=search) | Q(adresse__icontains=search)
+            )
+        if id_patient:
+            queryset = queryset.filter(id_patient__icontains=id_patient)
+        if sexe:
+            queryset = queryset.filter(sexe__iexact=sexe)
+        if age_min:
+            queryset = queryset.filter(age__gte=age_min)
+        if age_max:
+            queryset = queryset.filter(age__lte=age_max)
+        if date_naissance:
+            queryset = queryset.filter(date_naissance=date_naissance)
+        if statut_inclusion:
+            queryset = queryset.filter(statut_inclusion__icontains=statut_inclusion)
+
+        return queryset
+
+    def get(self, request):
+        serializer = PatientSerializer(self.get_queryset(request), many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        payload = request.data.copy()
+        payload = apply_automatic_schema_fields(payload, current_user=request.user)
+        payload = ensure_incremental_identifiers(payload)
+        serializer = PatientSerializer(data=payload)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatientExportExcelView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def get(self, request):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'patients'
+        
+        headers = [
+            'id_patient', 'nom', 'prenom', 'age', 'sexe',
+            'demographie_sexe', 'demographie_age_ans', 'demographie_date_naissance',
+            'irc_etiologie_principale', 'dialyse_modalite_initiale', 'dialyse_date_debut',
+            'devenir_statut', 'devenir_date_deces', 'devenir_cause_deces'
+        ]
+        worksheet.append(headers)
+        
+        for patient in Patient.objects.all():
+            row = [
+                patient.id_patient, patient.nom, patient.prenom, patient.age, patient.sexe,
+                patient.demographie_sexe, patient.demographie_age_ans, patient.demographie_date_naissance,
+                patient.irc_etiologie_principale, patient.dialyse_modalite_initiale, patient.dialyse_date_debut,
+                patient.devenir_statut, patient.devenir_date_deces, patient.devenir_cause_deces
+            ]
+            worksheet.append(row)
+        
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="patients_export.xlsx"'
+        workbook.save(response)
+        return response
+
+
+class PatientDetailView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def get_object(self, pk):
+        return get_object_or_404(Patient, pk=pk)
+
+    def get(self, request, pk):
+        serializer = PatientSerializer(self.get_object(pk))
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        serializer = PatientSerializer(self.get_object(pk), data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        serializer = PatientSerializer(self.get_object(pk), data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        self.get_object(pk).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PatientBulkPurgeView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def delete(self, request):
+        deleted_count, _ = Patient.objects.all().delete()
+        return Response({'deleted_count': deleted_count}, status=status.HTTP_200_OK)
+
+
+class PatientImportExcelView(APIView):
+    permission_classes = [IsAdminOrChefService]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        excel_file = request.FILES.get('file')
+        if not excel_file:
+            return Response({'error': 'Fichier Excel requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+        source_file_name = getattr(excel_file, 'name', '')
+        lower_name = str(source_file_name).lower()
+        worksheet = None
+        dataframe = None
+
+        if lower_name.endswith('.xls'):
+            try:
+                excel_file.seek(0)
+                dataframe = pd.read_excel(excel_file, engine='xlrd')
+            except Exception as error:
+                return Response({'error': f'Impossible de lire le fichier Excel (.xls): {error}'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            try:
+                excel_file.seek(0)
+                workbook = load_workbook(excel_file, data_only=False)
+            except Exception as error:
+                return Response({'error': f'Impossible de lire le fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            worksheet = workbook[workbook.sheetnames[0]]
+
+            if is_schema_template_sheet(worksheet):
+                template, fields_created = parse_schema_from_template_sheet(worksheet, source_file_name)
+                template_data = PatientFormTemplateSerializer(template).data
+                return Response(
+                    {'mode': 'schema', 'template': template_data, 'fields_created': fields_created, 'patients_created': 0, 'errors': []},
+                    status=status.HTTP_201_CREATED,
+                )
+
+            try:
+                excel_file.seek(0)
+                dataframe = pd.read_excel(excel_file)
+            except Exception as error:
+                return Response({'error': f'Impossible de lire les donnees du fichier Excel: {error}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if dataframe is not None:
+            dataframe = dataframe.loc[:, ~dataframe.columns.astype(str).str.match(r'^(Unnamed|unnamed)(:.*)?$')]
+
+        headers = list(dataframe.columns)
+        template = upsert_template_from_headers(headers, worksheet, source_file_name, create_fields=False)
+
+        created_count = 0
+        row_errors = []
+        auto_increment_state = initialize_auto_increment_state()
+        
+        for index, row in dataframe.iterrows():
+            payload = build_patient_payload(row)
+            payload = apply_automatic_schema_fields(payload, auto_increment_state=auto_increment_state, current_user=request.user)
+            payload = ensure_required_identity_fields(payload)
+            payload = ensure_incremental_identifiers(payload, auto_increment_state=auto_increment_state, force_generated=True)
+            
+            serializer = PatientSerializer(data=payload)
+            if serializer.is_valid():
+                serializer.save()
+                created_count += 1
+            else:
+                row_errors.append({'row': index + 2, 'errors': serializer.errors})
+                print(f"ERREUR ligne {index+2}: {serializer.errors}")
+
+        if created_count > 0:
+            try:
+                refresh_postgres_flat_view(template)
+            except Exception as e:
+                print(f"Erreur rafraîchissement vue: {e}")
+
+        template_data = PatientFormTemplateSerializer(template).data
+        status_code = status.HTTP_201_CREATED if created_count else status.HTTP_200_OK
+        
+        print(f"\n{'='*80}")
+        print(f"IMPORT TERMINÉ: {created_count} patients créés, {len(row_errors)} erreurs")
+        print(f"{'='*80}\n")
+        
+        return Response(
+            {'mode': 'data', 'template': template_data, 'fields_created': len(template_data.get('fields', [])), 'patients_created': created_count, 'errors': row_errors},
+            status=status_code,
+        )
+
+
+class PatientSchemaView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def get(self, request):
+        template = None
+        for template_name in FIXED_CLASSEUR_TEMPLATE_NAMES:
+            template = (
+                PatientFormTemplate.objects.filter(name__iexact=template_name).order_by('-id').first()
+                or PatientFormTemplate.objects.filter(sheet_name__iexact=template_name).order_by('-id').first()
+            )
+            if template:
+                break
+        if not template:
+            template = PatientFormTemplate.objects.order_by('-id').first()
+        if not template:
+            return Response({'template': None})
+        return Response({'template': PatientFormTemplateSerializer(template).data})
+
+
+class PatientPlateformeFlatView(APIView):
+    permission_classes = [IsAdminOrChefService]
+
+    def get(self, request):
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT * FROM patients_plateforme_flat')
+            columns = [col[0] for col in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        return Response(rows)

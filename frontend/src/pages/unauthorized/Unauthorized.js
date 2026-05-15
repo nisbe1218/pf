@@ -1,8 +1,10 @@
 import React from 'react';
 import { Box, Button, Card, CardContent, Stack, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
+import { useLanguage } from '../../context/LanguageContext';
 
 function Unauthorized() {
+  const { t } = useLanguage();
   return (
     <Box sx={{ minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
       <Card sx={{ maxWidth: 560, width: '100%', overflow: 'hidden' }} elevation={0}>
@@ -12,13 +14,13 @@ function Unauthorized() {
               RBAC
             </Typography>
             <Typography variant="h4" fontWeight={900}>
-              Accès non autorisé
+              {t('unauthorizedTitle')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Votre rôle ne dispose pas des permissions nécessaires pour afficher cette page.
+              {t('unauthorizedMessage')}
             </Typography>
             <Button component={RouterLink} to="/dashboard" variant="contained" sx={{ alignSelf: 'flex-start' }}>
-              Retour au tableau de bord
+              {t('unauthorizedBack')}
             </Button>
           </Stack>
         </CardContent>

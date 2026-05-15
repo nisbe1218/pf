@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 from django.utils import timezone
 
@@ -48,16 +50,13 @@ class Patient(models.Model):
 	irc_connue_avant_dialyse = models.TextField(blank=True)
 	irc_source_adressage = models.TextField(blank=True)
 	irc_contexte_debut_dialyse = models.TextField(blank=True)
-	irc_duree_suivi_predialytique_mois = models.TextField(blank=True)
 	irc_themes_education_therapeutique = models.TextField(blank=True)
 	irc_niveau_comprehension_patient = models.TextField(blank=True)
 	irc_preference_therapie_renale = models.TextField(blank=True)
 	comorbidite_statut_diabete = models.TextField(blank=True)
 	comorbidite_liste = models.TextField(blank=True)
 	comorbidite_autre = models.TextField(blank=True)
-	icc_charlson = models.TextField(blank=True)
-	comorbidite_exposition_toxique = models.TextField(blank=True)
-	comorbidite_antecedents_medicaments_nephrotoxiques = models.TextField(blank=True)
+	icc_charlson = models.CharField(max_length=10, blank=True, null=True)
 	presentation_date_episode = models.TextField(blank=True)
 	presentation_lieu_debut = models.TextField(blank=True)
 	presentation_raisons_debut = models.TextField(blank=True)
@@ -73,7 +72,6 @@ class Patient(models.Model):
 	presentation_autonomie_fonctionnelle = models.TextField(blank=True)
 	presentation_notes_examen_clinique = models.TextField(blank=True)
 	biologie_date_prelevement = models.TextField(blank=True)
-	biologie_dfg_mdrd_ml_min_1_73m2 = models.TextField(blank=True)
 	biologie_creatinine_mg_l = models.TextField(blank=True)
 	biologie_uree_g_l = models.TextField(blank=True)
 	biologie_hemoglobine_g_dl = models.TextField(blank=True)
@@ -114,11 +112,6 @@ class Patient(models.Model):
 	dialyse_site_acces_initial = models.TextField(blank=True)
 	dialyse_date_creation_acces = models.TextField(blank=True)
 	dialyse_date_premiere_utilisation_acces = models.TextField(blank=True)
-	dialyse_jours_entre_catheter_et_fav = models.TextField(blank=True)
-	dialyse_acces_admission_tunnelise = models.TextField(blank=True)
-	dialyse_acces_admission_femoral = models.TextField(blank=True)
-	dialyse_acces_admission_fav = models.TextField(blank=True)
-	dialyse_acces_admission_peritoneale = models.TextField(blank=True)
 	dialyse_seances_par_semaine = models.TextField(blank=True)
 	dialyse_duree_seance_min = models.TextField(blank=True)
 	dialyse_debit_sanguin_ml_min = models.TextField(blank=True)
@@ -132,8 +125,6 @@ class Patient(models.Model):
 	dialyse_volume_stase_dp_ml = models.TextField(blank=True)
 	dialyse_information_transplantation_donnee = models.TextField(blank=True)
 	dialyse_statut_liste_attente_transplantation = models.TextField(blank=True)
-	transplantation_bilan_pretransplantation = models.TextField(blank=True)
-	immunologie_transfusion_immunisation = models.TextField(blank=True)
 	qualite_date_evaluation = models.TextField(blank=True)
 	qualite_spktv = models.TextField(blank=True)
 	qualite_urr_pct = models.TextField(blank=True)
@@ -146,12 +137,6 @@ class Patient(models.Model):
 	qualite_seances_raccourcies_30j = models.TextField(blank=True)
 	qualite_hypotensions_intradialytiques_30j = models.TextField(blank=True)
 	qualite_observance_declaree_patient = models.TextField(blank=True)
-	education_connaissance_pratique_dialyse = models.TextField(blank=True)
-	education_soins_acces_vasculaire = models.TextField(blank=True)
-	education_surveillance_poids_fluides = models.TextField(blank=True)
-	education_dietetique = models.TextField(blank=True)
-	education_traitements_associes = models.TextField(blank=True)
-	education_complications = models.TextField(blank=True)
 	traitement_medicaments_renaux_actuels = models.TextField(blank=True)
 	traitement_autres_notes = models.TextField(blank=True)
 	complication_debut_periode_suivi = models.TextField(blank=True)
@@ -167,7 +152,6 @@ class Patient(models.Model):
 	devenir_statut = models.TextField(blank=True)
 	devenir_date_deces = models.TextField(blank=True)
 	devenir_cause_deces = models.TextField(blank=True)
-	devenir_delai_deces_jours = models.TextField(blank=True)
 	devenir_date_transplantation = models.TextField(blank=True)
 	devenir_qualite_vie = models.TextField(blank=True)
 	devenir_categorie_pronostique = models.TextField(blank=True)
@@ -190,6 +174,14 @@ class Patient(models.Model):
 	class Meta:
 		ordering = ['-created_at', '-id']
 
+	def _numeric_suffix(self, value):
+		if value is None:
+			return None
+		match = re.search(r'(\d+)$', str(value).strip())
+		if not match:
+			return None
+		return match.group(1)
+
 	def save(self, *args, **kwargs):
 		super().save(*args, **kwargs)
 
@@ -197,8 +189,13 @@ class Patient(models.Model):
 		if not self.id_patient:
 			self.id_patient = f"PAT-{self.pk:06d}"
 			updates.append('id_patient')
-		if not self.id_enregistrement_source:
-			self.id_enregistrement_source = f"SRC-{self.pk:06d}"
+		patient_number = self._numeric_suffix(self.id_patient)
+		if patient_number:
+			expected_source = f"SRC-{int(patient_number):06d}"
+		else:
+			expected_source = f"SRC-{self.pk:06d}"
+		if self.id_enregistrement_source != expected_source:
+			self.id_enregistrement_source = expected_source
 			updates.append('id_enregistrement_source')
 
 		section_field_mappings = {
@@ -227,7 +224,6 @@ class Patient(models.Model):
 		        'irc_connue_avant_dialyse',
 		        'irc_source_adressage',
 		        'irc_contexte_debut_dialyse',
-		        'irc_duree_suivi_predialytique_mois',
 		        'irc_themes_education_therapeutique',
 		        'irc_niveau_comprehension_patient',
 		        'irc_preference_therapie_renale',
@@ -236,8 +232,6 @@ class Patient(models.Model):
 		        'comorbidite_statut_diabete',
 		        'comorbidite_liste',
 		        'comorbidite_autre',
-		        'comorbidite_exposition_toxique',
-		        'comorbidite_antecedents_medicaments_nephrotoxiques',
 		    ],
 		    'presentation_data': [
 		        'presentation_date_episode',
@@ -257,7 +251,6 @@ class Patient(models.Model):
 		    ],
 		    'biologie_data': [
 		        'biologie_date_prelevement',
-		        'biologie_dfg_mdrd_ml_min_1_73m2',
 		        'biologie_creatinine_mg_l',
 		        'biologie_uree_g_l',
 		        'biologie_hemoglobine_g_dl',
@@ -302,11 +295,6 @@ class Patient(models.Model):
 		        'dialyse_site_acces_initial',
 		        'dialyse_date_creation_acces',
 		        'dialyse_date_premiere_utilisation_acces',
-		        'dialyse_jours_entre_catheter_et_fav',
-		        'dialyse_acces_admission_tunnelise',
-		        'dialyse_acces_admission_femoral',
-		        'dialyse_acces_admission_fav',
-		        'dialyse_acces_admission_peritoneale',
 		        'dialyse_seances_par_semaine',
 		        'dialyse_duree_seance_min',
 		        'dialyse_debit_sanguin_ml_min',
@@ -355,7 +343,6 @@ class Patient(models.Model):
 		        'devenir_statut',
 		        'devenir_date_deces',
 		        'devenir_cause_deces',
-		        'devenir_delai_deces_jours',
 		        'devenir_date_transplantation',
 		        'devenir_qualite_vie',
 		        'devenir_categorie_pronostique',

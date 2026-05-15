@@ -2,6 +2,10 @@ from rest_framework import serializers
 from .models import Utilisateur, Role
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+
+class PersonalNotesSerializer(serializers.Serializer):
+    notes = serializers.CharField(allow_blank=True, required=False, max_length=100000)
+
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
@@ -17,27 +21,15 @@ class RolePublicSerializer(serializers.ModelSerializer):
 
 class UtilisateurSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
-    password_hash = serializers.SerializerMethodField()
     role_id = serializers.PrimaryKeyRelatedField(
         queryset=Role.objects.all(), source='role', write_only=True
     )
-
-    def get_password_hash(self, obj):
-        request = self.context.get('request')
-        if not request or not getattr(request, 'user', None):
-            return None
-
-        user_role = getattr(getattr(request.user, 'role', None), 'nom', None)
-        if user_role in ['super_admin', 'chef_service']:
-            return obj.password
-
-        return None
 
     class Meta:
         model = Utilisateur
         fields = [
             'id', 'email', 'nom', 'prenom',
-            'telephone', 'role', 'role_id', 'password_hash',
+            'telephone', 'role', 'role_id',
             'is_active', 'date_creation'
         ]
         read_only_fields = ['date_creation']
@@ -57,20 +49,24 @@ class CreateUtilisateurSerializer(serializers.ModelSerializer):
 
 
 class UpdateUtilisateurSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False, allow_blank=False, min_length=8)
     role_id = serializers.PrimaryKeyRelatedField(
         queryset=Role.objects.all(), source='role', required=False, allow_null=True
     )
 
     class Meta:
         model = Utilisateur
-        fields = ['email', 'nom', 'prenom', 'telephone', 'role_id', 'is_active']
+        fields = ['email', 'nom', 'prenom', 'telephone', 'role_id', 'is_active', 'password']
 
     def update(self, instance, validated_data):
         role = validated_data.pop('role', None)
+        password = validated_data.pop('password', None)
         for attribute, value in validated_data.items():
             setattr(instance, attribute, value)
         if role is not None:
             instance.role = role
+        if password:
+            instance.set_password(password)
         instance.save()
         return instance
 

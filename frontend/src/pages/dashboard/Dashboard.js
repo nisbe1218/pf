@@ -9,6 +9,10 @@ import {
   Avatar,
   Chip,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   IconButton,
   InputAdornment,
@@ -31,9 +35,9 @@ import CallOutlinedIcon from '@mui/icons-material/CallOutlined';
 import AppSidebar from '../../components/common/AppSidebar';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
-import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useLanguage } from '../../context/LanguageContext';
 
 const roleLabels = {
   super_admin: 'Super Administrateur',
@@ -49,6 +53,20 @@ const roleDescriptions = {
   resident: 'Utilisation opérationnelle, consultation des dossiers et application des prédictions IA.',
 };
 
+const DASHBOARD_THEME = {
+  deepNavy: '#0A2B3E',
+  medicalBlue: '#1A6B8A',
+  softRose: '#D47A8E',
+  dustyRose: '#C46B82',
+  blushPink: '#F0D3DF',
+  offWhite: '#F5F9FC',
+  lightGray: '#EFF3F6',
+  borderLight: '#E2ECF0',
+  textMuted: '#6B8A9C',
+  white: '#FFFFFF',
+  warning: '#E8A29E',
+};
+
 const emptyForm = {
   id: null,
   email: '',
@@ -60,20 +78,9 @@ const emptyForm = {
   password: '',
 };
 
-const formatHashSnippet = (hash) => {
-  if (!hash) {
-    return '';
-  }
-
-  if (hash.length <= 34) {
-    return hash;
-  }
-
-  return `${hash.slice(0, 18)}…${hash.slice(-10)}`;
-};
-
 function Dashboard() {
-  const { user, refreshProfile, logout } = useContext(AuthContext);
+  const { user, refreshProfile } = useContext(AuthContext);
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const [roles, setRoles] = useState([]);
@@ -81,20 +88,66 @@ function Dashboard() {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [adminPassword, setAdminPassword] = useState('');
-  const [revealDialogOpen, setRevealDialogOpen] = useState(false);
-  const [revealTargetUser, setRevealTargetUser] = useState(null);
-  const [revealDialogPassword, setRevealDialogPassword] = useState('');
-  const [revealing, setRevealing] = useState(false);
-  const [revealedHashes, setRevealedHashes] = useState({});
-  const [loadingData, setLoadingData] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTargetUser, setDeleteTargetUser] = useState(null);
+  const [deletePassword, setDeletePassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showManagementPanel, setShowManagementPanel] = useState(false);
 
   const isAdminScope = user?.role === 'super_admin' || user?.role === 'chef_service';
   const isDashboardActive = location.pathname.startsWith('/dashboard');
   const isPatientsActive = location.pathname.startsWith('/patients');
   const isModelAiActive = location.pathname.startsWith('/modele-ai');
+
+  const shellSx = {
+    flexGrow: 1,
+    minHeight: '100vh',
+    pt: 0,
+    pb: { xs: 2, md: 3 },
+    px: { xs: 0, md: 1 },
+    background: [
+      'radial-gradient(circle at top left, rgba(168,207,238,.48), transparent 34%)',
+      'radial-gradient(circle at top right, rgba(158,61,106,.14), transparent 28%)',
+      'linear-gradient(160deg,#f7f0f5 0%,#edf4fb 42%,#f4eef8 100%)',
+    ].join(', '),
+  };
+
+  const heroSx = {
+    mb: 3,
+    p: { xs: 2.5, md: 3.5 },
+    borderRadius: 5,
+    color: DASHBOARD_THEME.white,
+    overflow: 'hidden',
+    position: 'relative',
+    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.12)',
+    background: `linear-gradient(135deg, ${DASHBOARD_THEME.deepNavy} 0%, ${DASHBOARD_THEME.medicalBlue} 45%, ${DASHBOARD_THEME.softRose} 100%)`,
+  };
+
+  const softCardSx = {
+    borderRadius: 5,
+    overflow: 'hidden',
+    border: `1px solid ${DASHBOARD_THEME.borderLight}`,
+    background: `linear-gradient(180deg, ${DASHBOARD_THEME.white} 0%, ${DASHBOARD_THEME.offWhite} 100%)`,
+    boxShadow: '0 18px 52px rgba(15, 23, 42, 0.08)',
+  };
+
+  const subtlePanelSx = {
+    borderRadius: 5,
+    border: `1px solid ${DASHBOARD_THEME.borderLight}`,
+    background: `linear-gradient(180deg, ${DASHBOARD_THEME.white}, ${DASHBOARD_THEME.offWhite})`,
+    boxShadow: '0 16px 44px rgba(15, 23, 42, 0.06)',
+  };
+
+  const statCardSx = (accent) => ({
+    height: '100%',
+    borderRadius: 4,
+    border: `1px solid ${DASHBOARD_THEME.borderLight}`,
+    borderTop: `4px solid ${accent}`,
+    background: `linear-gradient(180deg, ${DASHBOARD_THEME.white}, ${DASHBOARD_THEME.offWhite})`,
+    boxShadow: '0 12px 34px rgba(15, 23, 42, 0.06)',
+  });
 
   const stats = useMemo(() => {
     const managedUsers = users.filter((managedUser) => {
@@ -145,7 +198,6 @@ function Dashboard() {
       return;
     }
 
-    setLoadingData(true);
     setError('');
     try {
       const [rolesResponse, usersResponse] = await Promise.all([
@@ -156,8 +208,6 @@ function Dashboard() {
       setUsers(usersResponse.data);
     } catch (requestError) {
       setError('Impossible de charger les comptes et les rôles.');
-    } finally {
-      setLoadingData(false);
     }
   };
 
@@ -171,60 +221,6 @@ function Dashboard() {
     setSuccess('');
   };
 
-  const openRevealDialog = (selectedUser) => {
-    setRevealTargetUser(selectedUser);
-    setRevealDialogPassword('');
-    setRevealDialogOpen(true);
-    setError('');
-    setSuccess('');
-  };
-
-  const closeRevealDialog = () => {
-    setRevealDialogOpen(false);
-    setRevealTargetUser(null);
-    setRevealDialogPassword('');
-    setRevealing(false);
-  };
-
-  const revealPasswordHash = async () => {
-    if (!revealTargetUser) {
-      return;
-    }
-
-    if (!revealDialogPassword) {
-      setError('Saisissez le mot de passe du compte connecté.');
-      return;
-    }
-
-    setRevealing(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await api.post('auth/confirm-password/', {
-        password: revealDialogPassword,
-      });
-
-      if (!response.data?.confirmed) {
-        setError('Confirmation refusée.');
-        return;
-      }
-
-      setRevealedHashes((currentHashes) => ({
-        ...currentHashes,
-        [revealTargetUser.id]: revealTargetUser.password_hash,
-      }));
-      setSuccess('Mot de passe haché affiché.');
-    } catch (requestError) {
-      const apiMessage = requestError?.response?.data?.error
-        || requestError?.response?.data?.detail
-        || Object.values(requestError?.response?.data || {})[0];
-      setError(apiMessage || 'Impossible d’afficher le mot de passe haché.');
-    } finally {
-      setRevealing(false);
-    }
-  };
-
   const beginEdit = (selectedUser) => {
     setForm({
       id: selectedUser.id,
@@ -236,6 +232,7 @@ function Dashboard() {
       is_active: selectedUser.is_active,
       password: '',
     });
+    setShowManagementPanel(true);
     setError('');
     setSuccess('');
   };
@@ -265,6 +262,10 @@ function Dashboard() {
         confirmation_password: adminPassword,
       };
 
+      if (form.password && String(form.password).trim()) {
+        payload.password = form.password;
+      }
+
       const resolvedRole = resolveRoleById(form.role_id);
 
       if (form.id) {
@@ -293,15 +294,44 @@ function Dashboard() {
       const apiMessage = requestError?.response?.data?.error
         || requestError?.response?.data?.detail
         || Object.values(requestError?.response?.data || {})[0];
-      setError(apiMessage || 'Impossible d’enregistrer le compte. Vérifie les droits et la confirmation.');
+      
+      let userFriendlyError = apiMessage;
+      if (apiMessage === 'Confirmation refusée') {
+        userFriendlyError = 'Mot de passe de validation incorrect. Vérifie que tu as entré ton propre mot de passe d\'administrateur.';
+      } else if (apiMessage === 'Confirmation administrateur requise') {
+        userFriendlyError = 'Tu dois entrer ton mot de passe de validation pour pouvoir modifier ce compte.';
+      }
+      
+      setError(userFriendlyError || 'Impossible d\'enregistrer le compte. Vérifie les droits et la confirmation.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteUser = async (selectedUser) => {
-    const confirmed = window.confirm(`Supprimer le compte ${selectedUser.email} ?`);
-    if (!confirmed) {
+    setDeleteTargetUser(selectedUser);
+    setDeletePassword('');
+    setDeleteDialogOpen(true);
+    setError('');
+    setSuccess('');
+  };
+
+  const closeDeleteDialog = () => {
+    if (saving) {
+      return;
+    }
+    setDeleteDialogOpen(false);
+    setDeleteTargetUser(null);
+    setDeletePassword('');
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteTargetUser) {
+      return;
+    }
+
+    if (!deletePassword.trim()) {
+      setError('Saisis le mot de passe de ton compte pour confirmer la suppression.');
       return;
     }
 
@@ -310,13 +340,16 @@ function Dashboard() {
     setSuccess('');
 
     try {
-      await api.delete(`auth/utilisateurs/${selectedUser.id}/`, {
-        data: { confirmation_password: adminPassword },
+      await api.delete(`auth/utilisateurs/${deleteTargetUser.id}/`, {
+        data: { confirmation_password: deletePassword },
       });
-      setUsers((currentUsers) => currentUsers.filter((managedUser) => managedUser.id !== selectedUser.id));
+      setUsers((currentUsers) => currentUsers.filter((managedUser) => managedUser.id !== deleteTargetUser.id));
       setSuccess('Compte supprimé avec succès.');
       await loadManagementData();
       resetForm();
+      setDeleteDialogOpen(false);
+      setDeleteTargetUser(null);
+      setDeletePassword('');
     } catch (requestError) {
       const apiMessage = requestError?.response?.data?.error
         || requestError?.response?.data?.detail
@@ -327,176 +360,160 @@ function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
   return (
     <Box
       sx={{
-        flexGrow: 1,
-        minHeight: '100vh',
-        pt: 0,
-        pb: 3,
-        px: { xs: 0, md: 1 },
-        background: 'radial-gradient(circle at top left, rgba(102, 190, 219, 0.18), transparent 22%), radial-gradient(circle at bottom right, rgba(163, 221, 228, 0.14), transparent 18%), linear-gradient(180deg, #eaf7fb 0%, #f4fbff 100%)',
+        ...shellSx,
       }}
     >
-      <Grid container spacing={2} alignItems="flex-start">
-        <Grid item xs={12} md={3} lg={2}>
-          <AppSidebar />
-        </Grid>
+      <Box sx={{ maxWidth: 1680, mx: 'auto', width: '100%' }}>
+        <AppSidebar />
 
-        <Grid item xs={12} md={9} lg={10}>
-      <Paper
-        elevation={0}
-        sx={{
-          mb: 3,
-          p: { xs: 2.5, md: 3.5 },
-          borderRadius: 5,
-          background: 'linear-gradient(135deg, #2C6975 0%, #68B2A0 45%, #CDE0C9 100%)',
-          color: 'white',
-          overflow: 'hidden',
-          position: 'relative',
-          boxShadow: '0 28px 70px rgba(15, 23, 42, 0.14)',
-        }}
-      >
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 'auto -80px -80px auto',
-            width: 220,
-            height: 220,
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.08)',
-            filter: 'blur(2px)',
-          }}
-        />
-        <Stack spacing={1.25} sx={{ position: 'relative' }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
-            <Chip
-              label={roleLabels[user?.role] || 'Utilisateur'}
-              sx={{ alignSelf: 'flex-start', bgcolor: 'rgba(255,255,255,0.18)', color: 'white' }}
+        <Box sx={{ minWidth: 0, '@media (min-width:768px)': { ml: '94px' } }}>
+          <Paper elevation={0} sx={heroSx}>
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 'auto -120px -120px auto',
+                width: 280,
+                height: 280,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.10)',
+                filter: 'blur(2px)',
+              }}
             />
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Button
-                onClick={handleLogout}
-                variant="outlined"
-                startIcon={<LogoutOutlinedIcon />}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.35)',
-                  alignSelf: 'flex-start',
-                  '&:hover': {
-                    borderColor: 'rgba(255,255,255,0.75)',
-                    backgroundColor: 'rgba(255,255,255,0.08)',
-                  },
-                }}
-              >
-                Déconnexion
-              </Button>
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.08), transparent 42%, rgba(255,255,255,0.04))',
+                pointerEvents: 'none',
+              }}
+            />
+            <Stack spacing={1.5} sx={{ position: 'relative' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
+                <Chip
+                  label={roleLabels[user?.role] || 'Utilisateur'}
+                  sx={{ alignSelf: 'flex-start', bgcolor: 'rgba(255,255,255,0.16)', color: 'white', fontWeight: 700 }}
+                />
+              </Stack>
+              <Box sx={{ maxWidth: 860 }}>
+                <Typography variant="h3" fontWeight={900} sx={{ letterSpacing: '-.04em', lineHeight: 1.02, color: '#FFFFFF', textShadow: '0 2px 10px rgba(10, 43, 62, 0.30)' }}>
+                  {t('dashboardTitle')}
+                </Typography>
+                <Typography variant="body1" sx={{ mt: 1, maxWidth: 760, color: 'rgba(255,255,255,0.96)', fontSize: '1.02rem' }}>
+                  {t('dashboardSubtitle')}
+                </Typography>
+                <Button
+                  variant="contained"
+                  onClick={() => navigate('/monitor')}
+                  sx={{
+                    mt: 2,
+                    borderRadius: 999,
+                    textTransform: 'none',
+                    bgcolor: 'rgba(255,255,255,0.16)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.24)',
+                    boxShadow: 'none',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.24)', boxShadow: 'none' },
+                  }}
+                >
+                  {t('dashboardOpenMonitor')}
+                </Button>
+              </Box>
             </Stack>
-          </Stack>
-          <Typography variant="h4" fontWeight={900}>
-            Tableau de bord RBAC
-          </Typography>
-          <Typography variant="body1" sx={{ maxWidth: 760, opacity: 0.92 }}>
-            Gestion hiérarchisée des utilisateurs, confirmation des opérations sensibles et accès limité aux rôles autorisés.
-          </Typography>
-        </Stack>
-      </Paper>
+          </Paper>
 
       {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3 }}>{success}</Alert>}
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#2C6975' }}>
+          <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.medicalBlue)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Comptes visibles
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardVisibleAccounts')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.visibleUsers}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Selon votre périmètre d’accès.
+                {t('dashboardVisibleAccountsDesc')}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#68B2A0' }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.softRose)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Actifs
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardActiveAccounts')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.activeUsers}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Comptes utilisables immédiatement.
+                {t('dashboardActiveAccountsDesc')}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#CDE0C9' }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.dustyRose)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Inactifs
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardInactiveAccounts')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.inactiveUsers}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Comptes suspendus ou revus.
+                {t('dashboardInactiveAccountsDesc')}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#2C6975' }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.medicalBlue)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Professeurs
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardProfessors')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.professorsCount}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Nombre de professeurs gérés.
+                {t('dashboardProfessorsDesc')}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#68B2A0' }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.softRose)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Résidents
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardResidents')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.residentsCount}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Nombre de résidents gérés.
+                {t('dashboardResidentsDesc')}
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={0} sx={{ height: '100%', borderTop: '4px solid', borderTopColor: '#E0ECDE' }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+              <Card elevation={0} sx={statCardSx(DASHBOARD_THEME.dustyRose)}>
             <CardContent sx={{ p: 2.5 }}>
-              <Typography variant="overline" color="text.secondary">
-                Rôles chargés
+                  <Typography variant="overline" sx={{ color: '#5b7384', fontWeight: 800, letterSpacing: '.08em' }}>
+                {t('dashboardRolesLoaded')}
               </Typography>
-              <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
+                  <Typography variant="h3" fontWeight={900} sx={{ mt: 0.5, letterSpacing: '-.04em' }}>
                 {stats.rolesCount}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Profils disponibles dans le système.
+                {t('dashboardRolesLoadedDesc')}
               </Typography>
             </CardContent>
           </Card>
@@ -505,69 +522,68 @@ function Dashboard() {
 
       <Grid container spacing={3}>
         <Grid item xs={12} xl={isAdminScope ? 4 : 12}>
-          <Stack spacing={3}>
-            <Card
-              elevation={0}
-              sx={{
-                borderRadius: 5,
-                overflow: 'hidden',
-                border: '1px solid rgba(94, 115, 141, 0.12)',
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(239,246,249,0.96) 100%)',
-                position: 'relative',
-                boxShadow: '0 18px 52px rgba(15, 23, 42, 0.08)',
-              }}
-            >
-              <Box
-                sx={{
-                  height: 10,
-                  background: 'linear-gradient(90deg, #165a72 0%, #1f9d8a 55%, #d18f47 100%)',
-                }}
-              />
+          <Stack spacing={3} sx={isAdminScope ? { position: { xl: 'sticky' }, top: { xl: 24 } } : undefined}>
+            <Card elevation={0} sx={subtlePanelSx}>
+              <Box sx={{ height: 10, background: `linear-gradient(90deg, ${DASHBOARD_THEME.deepNavy} 0%, ${DASHBOARD_THEME.medicalBlue} 55%, ${DASHBOARD_THEME.softRose} 100%)` }} />
               <CardContent sx={{ p: 0 }}>
                 <Box sx={{ p: 3 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2} sx={{ mb: 2.5 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2} sx={{ mb: 2.25 }}>
                     <Box>
                       <Typography variant="overline" color="primary.main" fontWeight={800}>
-                        Session active
+
+                  <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+                    <DialogTitle sx={{ fontWeight: 800 }}>Confirmer la suppression</DialogTitle>
+                    <DialogContent>
+                      <Stack spacing={2} sx={{ pt: 1 }}>
+                        <Alert severity="warning">
+                          {deleteTargetUser
+                            ? `Voulez-vous vraiment supprimer le compte ${deleteTargetUser.email} ?`
+                            : 'Voulez-vous vraiment supprimer ce compte ?'}
+                        </Alert>
+                        <Typography variant="body2" color="text.secondary">
+                          Si oui, saisis le mot de passe de ton propre compte pour valider l’opération.
+                        </Typography>
+                        <TextField
+                          label="Mot de passe de validation"
+                          type="password"
+                          value={deletePassword}
+                          onChange={(event) => setDeletePassword(event.target.value)}
+                          fullWidth
+                          size="small"
+                          autoFocus
+                        />
+                      </Stack>
+                    </DialogContent>
+                    <DialogActions sx={{ px: 3, pb: 3 }}>
+                      <Button onClick={closeDeleteDialog} variant="outlined" disabled={saving}>
+                        Annuler
+                      </Button>
+                      <Button onClick={confirmDeleteUser} variant="contained" color="error" disabled={saving}>
+                        {saving ? 'Suppression...' : 'Supprimer'}
+                      </Button>
+                    </DialogActions>
+                  </Dialog>
+                        {t('dashboardSessionActive')}
                       </Typography>
                       <Typography variant="h5" fontWeight={900} sx={{ mt: 0.5 }}>
-                        Profil connecté
+                        {t('dashboardConnectedProfile')}
                       </Typography>
                     </Box>
-                    <Chip
-                      label={roleLabels[user?.role] || 'Utilisateur'}
-                      sx={{ fontWeight: 800, bgcolor: 'rgba(44, 105, 117, 0.10)', color: '#2C6975' }}
-                    />
+                    <Chip label={roleLabels[user?.role] || 'Utilisateur'} sx={{ fontWeight: 800, bgcolor: 'rgba(26, 107, 138, 0.10)', color: DASHBOARD_THEME.medicalBlue }} />
                   </Stack>
 
-                  <Box
-                    sx={{
-                      p: 2.25,
-                      borderRadius: 4,
-                      background: 'linear-gradient(135deg, rgba(44,105,117,0.10), rgba(104,178,160,0.08))',
-                      border: '1px solid rgba(108, 178, 160, 0.18)',
-                      mb: 2.5,
-                    }}
-                  >
+                  <Box sx={{ p: 2.25, borderRadius: 4, background: 'linear-gradient(135deg, rgba(44,105,117,0.10), rgba(104,178,160,0.08))', border: '1px solid rgba(108, 178, 160, 0.18)', mb: 2.5 }}>
                     <Stack direction="row" spacing={2} alignItems="center">
-                      <Avatar
-                        sx={{
-                          width: 58,
-                          height: 58,
-                          bgcolor: '#2C6975',
-                          fontWeight: 900,
-                          boxShadow: '0 10px 24px rgba(44, 105, 117, 0.25)',
-                        }}
-                      >
+                      <Avatar sx={{ width: 58, height: 58, bgcolor: DASHBOARD_THEME.deepNavy, fontWeight: 900, boxShadow: '0 10px 24px rgba(10, 43, 62, 0.25)' }}>
                         {(user?.prenom?.[0] || '') + (user?.nom?.[0] || '')}
                       </Avatar>
                       <Box>
-                        <Typography variant="caption" color="text.secondary">Nom complet</Typography>
+                        <Typography variant="caption" color="text.secondary">{t('dashboardFullName')}</Typography>
                         <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.15 }}>
                           {user?.prenom || '-'} {user?.nom || ''}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {roleDescriptions[user?.role] || 'Accès limité au périmètre autorisé.'}
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                          {roleDescriptions[user?.role] || t('dashboardAccessLimit')}
                         </Typography>
                       </Box>
                     </Stack>
@@ -576,29 +592,23 @@ function Dashboard() {
                   <Stack spacing={1.5}>
                     <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
                       <Chip size="small" label={user?.email || '-'} variant="outlined" sx={{ borderRadius: 2 }} />
-                      <Chip size="small" label={user?.telephone || 'Téléphone non renseigné'} variant="outlined" sx={{ borderRadius: 2 }} />
+                      <Chip size="small" label={user?.telephone || t('dashboardUserPhone')} variant="outlined" sx={{ borderRadius: 2 }} />
                     </Stack>
                     <Divider sx={{ my: 0.5 }} />
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Nom</Typography>
-                      <Typography variant="body1" fontWeight={600}>{user?.nom || '-'}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Prénom</Typography>
-                      <Typography variant="body1" fontWeight={600}>{user?.prenom || '-'}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Email</Typography>
-                      <Typography variant="body1" fontWeight={600}>{user?.email || '-'}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Téléphone</Typography>
-                      <Typography variant="body1" fontWeight={600}>{user?.telephone || '-'}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Rôle</Typography>
-                      <Typography variant="body1" fontWeight={600}>{roleLabels[user?.role] || '-'}</Typography>
-                    </Box>
+                    <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                      <Box sx={{ minWidth: 110 }}>
+                        <Typography variant="caption" color="text.secondary">Nom</Typography>
+                        <Typography variant="body1" fontWeight={600}>{user?.nom || '-'}</Typography>
+                      </Box>
+                      <Box sx={{ minWidth: 110 }}>
+                        <Typography variant="caption" color="text.secondary">Prénom</Typography>
+                        <Typography variant="body1" fontWeight={600}>{user?.prenom || '-'}</Typography>
+                      </Box>
+                      <Box sx={{ minWidth: 180 }}>
+                        <Typography variant="caption" color="text.secondary">Rôle</Typography>
+                        <Typography variant="body1" fontWeight={600}>{roleLabels[user?.role] || '-'}</Typography>
+                      </Box>
+                    </Stack>
                   </Stack>
                 </Box>
               </CardContent>
@@ -608,32 +618,18 @@ function Dashboard() {
 
         {isAdminScope && (
           <Grid item xs={12} xl={8}>
-            <Card elevation={0} sx={{ borderRadius: 4, mb: 3, border: '1px solid rgba(94, 115, 141, 0.12)' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack
-                  direction={{ xs: 'column', md: 'row' }}
-                  spacing={2}
-                  justifyContent="space-between"
-                  alignItems={{ xs: 'stretch', md: 'center' }}
-                  sx={{ mb: 2 }}
-                >
-                  <Box>
-                    <Typography variant="h6" fontWeight={800}>
-                      Gestion des comptes
+            <Stack spacing={3}>
+              {showManagementPanel && (
+                <Card elevation={0} sx={{ ...softCardSx }}>
+                  <CardContent sx={{ p: 3 }}>
+                      <Typography variant="h6" fontWeight={800} sx={{ color: DASHBOARD_THEME.deepNavy, mb: 1.25 }}>
+                      {t('dashboardUserManagement')}
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Super administrateurs et chefs de service gèrent uniquement les Professeurs et Résidents.
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2.25, lineHeight: 1.7 }}>
+                      {t('dashboardUserManagementDesc')}
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      Pour enregistrer une modification, saisissez votre mot de passe de validation puis définissez le mot de passe du compte créé si nécessaire.
-                    </Typography>
-                  </Box>
-                  <Button onClick={loadManagementData} variant="outlined" disabled={loadingData} sx={{ minWidth: 130 }}>
-                    {loadingData ? 'Chargement...' : 'Rafraîchir'}
-                  </Button>
-                </Stack>
 
-                <Box component="form" onSubmit={handleSaveUser} sx={{ display: 'grid', gap: 2.25 }}>
+                    <Box component="form" onSubmit={handleSaveUser} sx={{ display: 'grid', gap: 2.25 }}>
                   <Grid container spacing={2}>
                     <Grid item xs={12} md={6}>
                       <TextField
@@ -648,7 +644,7 @@ function Dashboard() {
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <TextField
-                        label="Téléphone"
+                        label={t('dashboardUserPhone')}
                         name="telephone"
                         value={form.telephone}
                         onChange={handleChange}
@@ -699,7 +695,7 @@ function Dashboard() {
                         fullWidth
                         size="small"
                       >
-                        <MenuItem value="">Sélectionner</MenuItem>
+                        <MenuItem value="">{t('dashboardUserSelectRole')}</MenuItem>
                         {roles.map((role) => (
                           <MenuItem key={role.id} value={role.id}>
                             {role.label || role.nom}
@@ -734,7 +730,7 @@ function Dashboard() {
                     fullWidth
                     required
                     size="small"
-                    helperText="Mot de passe du compte connecté, obligatoire pour créer, modifier ou révoquer un compte."
+                    helperText={t('dashboardSaveConfirmationPassword')}
                   />
 
                   {!form.id && (
@@ -751,55 +747,99 @@ function Dashboard() {
                     />
                   )}
 
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <Button type="submit" variant="contained" disabled={saving} fullWidth>
-                      {form.id ? 'Modifier' : 'Créer'}
-                    </Button>
-                    <Button type="button" variant="outlined" onClick={resetForm} fullWidth>
-                      Réinitialiser
-                    </Button>
-                  </Stack>
-                </Box>
-              </CardContent>
-            </Card>
+                  {form.id && (
+                    <TextField
+                      label="Nouveau mot de passe"
+                      type="password"
+                      name="password"
+                      value={form.password}
+                      onChange={handleChange}
+                      fullWidth
+                      size="small"
+                      helperText="Laisser vide pour conserver le mot de passe actuel."
+                    />
+                  )}
 
-            <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94, 115, 141, 0.12)' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems="center" justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
-                  <Typography variant="h6" fontWeight={800}>
-                    Comptes gérés
-                  </Typography>
-                  <TextField
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Rechercher un utilisateur..."
-                    size="small"
-                    sx={{ width: { xs: '100%', sm: 320 } }}
-                  />
-                </Stack>
-                <Grid container spacing={2}>
-                  {manageableUsers.length ? manageableUsers.map((managedUser) => (
-                    <Grid item xs={12} sm={6} md={4} key={managedUser.id}>
-                      <Card
-                        elevation={0}
-                        sx={{
-                          borderRadius: 4,
-                          bgcolor: 'rgba(255,255,255,0.96)',
-                          border: '1px solid rgba(94, 115, 141, 0.12)',
-                          minHeight: 240,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                        }}
-                      >
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                      <Button type="submit" variant="contained" disabled={saving} fullWidth>
+                        {form.id ? t('dashboardUpdateButton') : t('dashboardCreateButton')}
+                      </Button>
+                      <Button type="button" variant="outlined" onClick={resetForm} fullWidth>
+                        {t('dashboardResetButton')}
+                      </Button>
+                    </Stack>
+                  </Box>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card elevation={0} sx={softCardSx}>
+                <CardContent sx={{ p: 3 }}>
+                  <Stack direction={{ xs: 'column', md: 'row' }} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" spacing={2.25} sx={{ mb: 2.25 }}>
+                    <Stack direction="row" spacing={1.25} alignItems="center">
+                      <Typography variant="h6" fontWeight={800} sx={{ color: DASHBOARD_THEME.deepNavy }}>
+                        Comptes gérés
+                      </Typography>
+                      {isAdminScope && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => setShowManagementPanel((current) => !current)}
+                          sx={{
+                            borderRadius: 999,
+                            textTransform: 'none',
+                            borderColor: DASHBOARD_THEME.medicalBlue,
+                            color: DASHBOARD_THEME.medicalBlue,
+                            bgcolor: 'white',
+                            '&:hover': {
+                              borderColor: DASHBOARD_THEME.softRose,
+                              color: DASHBOARD_THEME.deepNavy,
+                              bgcolor: 'rgba(212,122,142,0.08)',
+                            },
+                          }}
+                        >
+                          {showManagementPanel ? 'Masquer' : 'Afficher'}
+                        </Button>
+                      )}
+                    </Stack>
+                    <TextField
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Rechercher un utilisateur..."
+                      size="small"
+                      sx={{ width: { xs: '100%', sm: 360 }, bgcolor: 'white', borderRadius: 2 }}
+                    />
+                  </Stack>
+                  <Grid container spacing={2}>
+                    {manageableUsers.length ? manageableUsers.map((managedUser) => (
+                      <Grid item xs={12} sm={6} md={4} key={managedUser.id}>
+                        <Card
+                          elevation={0}
+                          sx={{
+                            borderRadius: 3,
+                            bgcolor: DASHBOARD_THEME.white,
+                            border: `1px solid ${DASHBOARD_THEME.borderLight}`,
+                            borderLeft: `5px solid ${managedUser.is_active ? DASHBOARD_THEME.medicalBlue : DASHBOARD_THEME.softRose}`,
+                            minHeight: 250,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            boxShadow: '0 8px 22px rgba(15, 23, 42, 0.04)',
+                            transition: 'transform 180ms ease, box-shadow 180ms ease',
+                            '&:hover': {
+                              transform: 'translateY(-2px)',
+                              boxShadow: '0 14px 30px rgba(15, 23, 42, 0.08)',
+                            },
+                          }}
+                        >
                         <CardContent sx={{ p: 2.5 }}>
                           <Stack spacing={1.5}>
                             <Stack direction="row" spacing={2} alignItems="center">
-                              <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48, fontWeight: 700 }}>
+                              <Avatar sx={{ width: 48, height: 48, fontWeight: 700, bgcolor: DASHBOARD_THEME.deepNavy, boxShadow: '0 8px 18px rgba(10,43,62,0.18)' }}>
                                 {(managedUser.nom?.[0] || managedUser.prenom?.[0] || 'U').toUpperCase()}
                               </Avatar>
                               <Box>
-                                <Typography variant="subtitle1" fontWeight={800}>
+                                <Typography variant="subtitle1" fontWeight={800} sx={{ color: DASHBOARD_THEME.deepNavy }}>
                                   {managedUser.nom || '-'} {managedUser.prenom || ''}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
@@ -809,15 +849,11 @@ function Dashboard() {
                             </Stack>
 
                             <Stack direction="row" spacing={1} alignItems="center">
-                              <Chip
-                                label={managedUser.is_active ? 'Actif' : 'Inactif'}
-                                color={managedUser.is_active ? 'success' : 'error'}
-                                size="small"
-                              />
+                              <Chip label={managedUser.is_active ? 'Actif' : 'Inactif'} color={managedUser.is_active ? 'success' : 'error'} size="small" />
                             </Stack>
 
                             <Stack spacing={0.75}>
-                              <Typography variant="caption" color="text.secondary">Téléphone</Typography>
+                              <Typography variant="caption" color="text.secondary">{t('dashboardUserPhone')}</Typography>
                               <Typography variant="body2">{managedUser.telephone || '-'}</Typography>
                             </Stack>
 
@@ -825,58 +861,30 @@ function Dashboard() {
                               <Typography variant="caption" color="text.secondary">Rôle</Typography>
                               <Typography variant="body2">{managedUser.role?.label || managedUser.role?.nom || '-'}</Typography>
                             </Stack>
-
-                            <Stack spacing={0.75}>
-                              <Typography variant="caption" color="text.secondary">Mot de passe haché</Typography>
-                              <Box
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 1,
-                                  px: 1.25,
-                                  py: 0.9,
-                                  borderRadius: 2,
-                                  backgroundColor: 'rgba(22, 90, 114, 0.08)',
-                                  border: '1px solid rgba(22, 90, 114, 0.18)',
-                                }}
-                              >
-                                <Typography
-                                  variant="caption"
-                                  component="code"
-                                  sx={{
-                                    fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-                                    wordBreak: 'break-all',
-                                    flex: 1,
-                                  }}
-                                >
-                                  {formatHashSnippet(managedUser.password_hash || 'HASH')}
-                                </Typography>
-                              </Box>
-                            </Stack>
                           </Stack>
                         </CardContent>
 
                         <Box sx={{ p: 2.5, pt: 0 }}>
                           <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={1}>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => beginEdit(managedUser)}
-                                aria-label="Éditer le compte"
-                                sx={{ minWidth: 0, px: 1.1 }}
-                              >
-                                <EditOutlinedIcon fontSize="small" />
-                              </Button>
-                              <Button
-                                size="small"
-                                color="error"
-                                variant="outlined"
-                                onClick={() => handleDeleteUser(managedUser)}
-                                aria-label="Révoquer le compte"
-                                sx={{ minWidth: 0, px: 1.1 }}
-                              >
-                                <DeleteOutlineOutlinedIcon fontSize="small" />
-                              </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => beginEdit(managedUser)}
+                              aria-label="Éditer le compte"
+                              sx={{ minWidth: 0, px: 1.1, borderRadius: 2 }}
+                            >
+                              <EditOutlinedIcon fontSize="small" />
+                            </Button>
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="outlined"
+                              onClick={() => handleDeleteUser(managedUser)}
+                              aria-label="Révoquer le compte"
+                              sx={{ minWidth: 0, px: 1.1, borderRadius: 2 }}
+                            >
+                              <DeleteOutlineOutlinedIcon fontSize="small" />
+                            </Button>
                           </Stack>
                         </Box>
                       </Card>
@@ -891,12 +899,46 @@ function Dashboard() {
                 </Grid>
               </CardContent>
             </Card>
+            </Stack>
           </Grid>
         )}
       </Grid>
 
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
+
+      <Dialog open={deleteDialogOpen} onClose={closeDeleteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>Confirmer la suppression</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Alert severity="warning">
+              {deleteTargetUser
+                ? `Voulez-vous vraiment supprimer le compte ${deleteTargetUser.email} ?`
+                : 'Voulez-vous vraiment supprimer ce compte ?'}
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              Si oui, saisis le mot de passe de ton propre compte pour valider l’opération.
+            </Typography>
+            <TextField
+              label="Mot de passe de validation"
+              type="password"
+              value={deletePassword}
+              onChange={(event) => setDeletePassword(event.target.value)}
+              fullWidth
+              size="small"
+              autoFocus
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={closeDeleteDialog} variant="outlined" disabled={saving}>
+            Annuler
+          </Button>
+          <Button onClick={confirmDeleteUser} variant="contained" color="error" disabled={saving}>
+            {saving ? 'Suppression...' : 'Supprimer'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
     </Box>
   );

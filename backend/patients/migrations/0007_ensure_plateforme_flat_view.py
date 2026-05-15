@@ -19,6 +19,7 @@ MODEL_FIELD_MAP = {
     'adresse': 'adresse',
     'date_naissance': 'date_naissance',
     'date_admission': 'date_admission',
+    'icc_charlson': 'icc_charlson',
 }
 
 SECTION_BUCKETS = [
@@ -62,8 +63,35 @@ def ensure_plateforme_flat_view(apps, schema_editor):
     if not keys:
         return
 
+    fixed_keys = [
+        'id_patient',
+        'id_enregistrement_source',
+        'id_site',
+        'statut_inclusion',
+        'statut_consentement',
+        'utilisateur_saisie',
+        'derniere_mise_a_jour',
+        'date_evaluation_initiale',
+        'nom',
+        'prenom',
+        'age',
+        'sexe',
+        'maladie',
+        'telephone',
+        'adresse',
+        'date_naissance',
+        'date_admission',
+        'icc_charlson',
+    ]
+
     select_parts = ['p.id AS id']
+    for key in fixed_keys:
+        if key in MODEL_FIELD_MAP:
+            select_parts.append(f"p.{MODEL_FIELD_MAP[key]} AS {_quote_identifier(key)}")
+
     for key in keys:
+        if key in fixed_keys:
+            continue
         if key in MODEL_FIELD_MAP:
             expr = f"p.{MODEL_FIELD_MAP[key]}"
         else:

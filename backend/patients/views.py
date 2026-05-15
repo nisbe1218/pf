@@ -5,6 +5,7 @@ import json
 import os
 import io
 from datetime import datetime, timedelta
+from http.client import RemoteDisconnected
 from urllib import request as urllib_request
 from urllib import error as urllib_error
 
@@ -27,6 +28,94 @@ from audit.models import AuditLog
 
 from .models import Patient, PatientFormField, PatientFormTemplate
 from .serializers import PatientFormTemplateSerializer, PatientSerializer
+from .preprocess_rag import build_rag_context, estimate_route
+
+
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        obj_module = getattr(obj.__class__, '__module__', '')
+        if obj_module.startswith('numpy'):
+            if hasattr(obj, 'tolist'):
+                try:
+                    return obj.tolist()
+                except Exception:
+                    pass
+            if hasattr(obj, 'item'):
+                try:
+                    return obj.item()
+                except Exception:
+                    pass
+            return str(obj)
+        return super().default(obj)
+
+
+def _safe_json_value(value):
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, float):
+        return None if value != value else value
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, dict):
+        return {str(key): _safe_json_value(item) for key, item in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_json_value(item) for item in value]
+
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+
+    if isinstance(value, pd.Series):
+        return [_safe_json_value(item) for item in value.tolist()]
+
+    if isinstance(value, pd.DataFrame):
+        return [_safe_json_value(row) for row in value.to_dict(orient='records')]
+
+    value_module = getattr(value.__class__, '__module__', '')
+    if value_module.startswith('numpy'):
+        if hasattr(value, 'tolist'):
+            try:
+                return _safe_json_value(value.tolist())
+            except Exception:
+                pass
+        if hasattr(value, 'item'):
+            try:
+                return _safe_json_value(value.item())
+            except Exception:
+                pass
+
+    if hasattr(value, 'to_pydatetime'):
+        try:
+            return value.to_pydatetime().isoformat()
+        except Exception:
+            pass
+
+    if hasattr(value, 'isoformat'):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+
+    if hasattr(value, 'to_dict'):
+        try:
+            return _safe_json_value(value.to_dict())
+        except Exception:
+            pass
+
+    return str(value)
 
 
 # ============================================================
@@ -1227,7 +1316,7 @@ def _save_preprocess_session(session_payload):
     session_payload['updated_at'] = timezone.now().isoformat()
     session_path = _preprocess_session_path(session_id)
     with open(session_path, 'w', encoding='utf-8') as handle:
-        json.dump(session_payload, handle, ensure_ascii=False)
+        json.dump(_safe_json_value(session_payload), handle, ensure_ascii=False)
     return session_payload
 
 
@@ -1373,58 +1462,88 @@ def _build_technical_profile(dataframe):
     }
 
 
+def _get_section_prefix_for_column(column_name):
+    normalized = normalize_header(column_name)
+    for prefix, section_name in SECTION_PREFIX_MAP.items():
+        if normalized.startswith(prefix):
+            return section_name
+    return 'generic_data'
+
+
+def _build_preprocess_chunks(dataframe, technical_profile, max_rows_per_chunk=40):
+    chunks = []
+    columns = [str(column) for column in dataframe.columns.tolist()]
+    grouped_columns = {}
+
+    for column in columns:
+        grouped_columns.setdefault(_get_section_prefix_for_column(column), []).append(column)
+
+    for section_name, section_columns in grouped_columns.items():
+        if not section_columns:
+            continue
+        section_frame = dataframe[section_columns]
+        if len(section_frame.index) <= max_rows_per_chunk:
+            chunks.append({
+                'chunk_id': f'{section_name}:full',
+                'kind': 'section',
+                'section': section_name,
+                'columns': section_columns,
+                'rows_range': [0, max(0, len(section_frame.index) - 1)],
+                'row_count': int(len(section_frame.index)),
+                'preview_rows': _dataframe_to_rows(section_frame.head(3)),
+            })
+        else:
+            for start_index in range(0, len(section_frame.index), max_rows_per_chunk):
+                end_index = min(start_index + max_rows_per_chunk, len(section_frame.index))
+                chunk_frame = section_frame.iloc[start_index:end_index]
+                chunks.append({
+                    'chunk_id': f'{section_name}:rows:{start_index}-{end_index - 1}',
+                    'kind': 'row_batch',
+                    'section': section_name,
+                    'columns': section_columns,
+                    'rows_range': [start_index, end_index - 1],
+                    'row_count': int(len(chunk_frame.index)),
+                    'preview_rows': _dataframe_to_rows(chunk_frame.head(3)),
+                })
+
+    if not chunks:
+        chunks.append({
+            'chunk_id': 'generic:empty',
+            'kind': 'fallback',
+            'section': 'generic_data',
+            'columns': columns,
+            'rows_range': [0, 0],
+            'row_count': 0,
+            'preview_rows': [],
+        })
+
+    technical_profile['chunk_count'] = len(chunks)
+    technical_profile['chunks'] = [
+        {
+            'chunk_id': chunk['chunk_id'],
+            'kind': chunk['kind'],
+            'section': chunk['section'],
+            'row_count': chunk['row_count'],
+            'columns_count': len(chunk['columns']),
+        }
+        for chunk in chunks
+    ]
+    return chunks
+
+
+def _build_retrieval_context(dataframe, chunks, technical_profile, stage_name='diagnostic', max_chunks=4, progress_callback=None):
+    return build_rag_context(
+        dataframe,
+        chunks,
+        technical_profile,
+        stage_name=stage_name,
+        max_chunks=max_chunks,
+        progress_callback=progress_callback,
+    )
+
+
 def _determine_preprocess_route(technical_profile):
-    rows = int(technical_profile.get('rows') or 0)
-    columns = int(technical_profile.get('columns') or 0)
-    missing_pct = float(technical_profile.get('missing_pct') or 0.0)
-    duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
-    outlier_total = sum(int(item.get('outlier_count') or 0) for item in (technical_profile.get('numeric_columns_profile') or []))
-
-    fast_model = os.environ.get('OLLAMA_FAST_MODEL', 'qwen2.5:3b-instruct')
-    balanced_model = os.environ.get('OLLAMA_BALANCED_MODEL', os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct')))
-    advanced_model = os.environ.get('OLLAMA_ADVANCED_MODEL', 'qwen2.5:14b-instruct')
-
-    timeout_seconds = int(os.environ.get('OLLAMA_TIMEOUT_SECONDS', '420'))
-    primary_timeout_seconds = int(os.environ.get('OLLAMA_PRIMARY_TIMEOUT_SECONDS', str(min(timeout_seconds, 180))))
-    fallback_timeout_seconds = int(os.environ.get('OLLAMA_FALLBACK_TIMEOUT_SECONDS', str(timeout_seconds)))
-
-    if rows <= 50 and columns <= 15 and missing_pct == 0 and duplicate_rows == 0 and outlier_total == 0:
-        return {
-            'mode': 'deterministic',
-            'label': 'deterministic_only',
-            'reason': 'Dataset simple: pas de LLM necessaire.',
-            'primary_model': None,
-            'fallback_model': None,
-            'primary_timeout_seconds': 0,
-            'fallback_timeout_seconds': 0,
-            'primary_num_predict': 0,
-            'fallback_num_predict': 0,
-        }
-
-    if rows > 300 or columns > 40 or missing_pct >= 10 or duplicate_rows > 0 or outlier_total > 5:
-        return {
-            'mode': 'advanced',
-            'label': 'advanced_medical',
-            'reason': 'Dataset complexe: modele avancé priorisé.',
-            'primary_model': advanced_model,
-            'fallback_model': balanced_model,
-            'primary_timeout_seconds': int(os.environ.get('OLLAMA_ADVANCED_TIMEOUT_SECONDS', str(primary_timeout_seconds))),
-            'fallback_timeout_seconds': fallback_timeout_seconds,
-            'primary_num_predict': int(os.environ.get('OLLAMA_ADVANCED_NUM_PREDICT', os.environ.get('OLLAMA_NUM_PREDICT', '32'))),
-            'fallback_num_predict': int(os.environ.get('OLLAMA_NUM_PREDICT', '32')),
-        }
-
-    return {
-        'mode': 'balanced',
-        'label': 'balanced_default',
-        'reason': 'Dataset standard: modele equilibré priorisé.',
-        'primary_model': balanced_model,
-        'fallback_model': fast_model,
-        'primary_timeout_seconds': primary_timeout_seconds,
-        'fallback_timeout_seconds': fallback_timeout_seconds,
-        'primary_num_predict': int(os.environ.get('OLLAMA_NUM_PREDICT', '32')),
-        'fallback_num_predict': int(os.environ.get('OLLAMA_RETRY_NUM_PREDICT', '24')),
-    }
+    return estimate_route(technical_profile)
 
 
 def _strip_json_wrappers(response_text):
@@ -1655,7 +1774,7 @@ def _shrink_llm_payload(payload, max_columns=20, max_preview_rows=2, max_samples
 
 
 def _get_ollama_candidate_bases():
-    configured_base = str(os.environ.get('OLLAMA_URL', '')).rstrip('/')
+    configured_base = str(os.environ.get('OLLAMA_BASE_URL', '') or os.environ.get('OLLAMA_URL', '')).rstrip('/')
     fallback_base = str(os.environ.get('OLLAMA_FALLBACK_URL', '')).rstrip('/')
     running_in_docker = os.path.exists('/.dockerenv')
     default_base = 'http://ollama:11434' if running_in_docker else 'http://127.0.0.1:11434'
@@ -1812,11 +1931,29 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
         'stage': 'pass1_diagnostic',
         'second_pass': {'status': 'skipped_fallback'},
         'route': {'mode': 'deterministic', 'label': 'deterministic_only', 'reason': reason_message},
+        'pipeline': {
+            'stage': 'deterministic_only',
+            'chunks_count': technical_profile.get('chunk_count', 0),
+            'retrieval': 'skipped',
+        },
     }
 
 
 def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=None):
     route = _determine_preprocess_route(technical_profile)
+    chunks = _build_preprocess_chunks(dataframe, technical_profile)
+    retrieval_context = _build_retrieval_context(
+        dataframe,
+        chunks,
+        technical_profile,
+        stage_name='diagnostic',
+        max_chunks=int(os.environ.get('RAG_MAX_CHUNKS', '4')),
+        progress_callback=progress_callback,
+    )
+    technical_profile['chunk_count'] = len(chunks)
+    technical_profile['chunks'] = retrieval_context.get('chunk_summaries', [])
+    technical_profile['retrieved_chunks'] = retrieval_context.get('retrieved_chunks', [])
+
     if route.get('mode') == 'deterministic':
         deterministic_result = _build_deterministic_analysis_fallback(
             dataframe,
@@ -1824,6 +1961,8 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             route.get('reason', 'Dataset simple: pas de LLM necessaire.'),
         )
         deterministic_result['route'] = route
+        deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
+        deterministic_result['rag_context'] = retrieval_context
         return deterministic_result
 
     model_name = route.get('primary_model') or os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct'))
@@ -1838,6 +1977,13 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     candidate_bases = _get_ollama_candidate_bases()
 
     prompt_payload = _build_llm_payload(dataframe, technical_profile)
+    prompt_payload['rag'] = {
+        'chunk_count': len(chunks),
+        'retrieved_chunks': retrieval_context.get('retrieved_chunks', []),
+        'retrieved_chunks_count': retrieval_context.get('retrieved_chunks_count', 0),
+        'section_fusion': retrieval_context.get('section_fusion', []),
+        'vector_store': retrieval_context.get('vector_store', {}),
+    }
     fallback_payload = _shrink_llm_payload(
         prompt_payload,
         max_columns=retry_max_columns,
@@ -1939,7 +2085,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
                     stage_errors.append(
                         f"[{stage_name}:{attempt['label']}:{attempt['model']}] {ollama_endpoint} -> HTTP {error.code}: {error_body or str(error)}"
                     )
-                except (urllib_error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as error:
+                except (urllib_error.URLError, RemoteDisconnected, ConnectionError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as error:
                     stage_errors.append(
                         f"[{stage_name}:{attempt['label']}:{attempt['model']}] {ollama_endpoint} -> {error}"
                     )
@@ -1986,11 +2132,14 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     )
 
     if pass1_result.get('unavailable'):
-        return _build_deterministic_analysis_fallback(
+        deterministic_result = _build_deterministic_analysis_fallback(
             dataframe,
             technical_profile,
             pass1_result.get('summary', 'Passe 1 indisponible.'),
         )
+        deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
+        deterministic_result['rag_context'] = retrieval_context
+        return deterministic_result
 
     pass1_issues = pass1_result.get('issues') if isinstance(pass1_result.get('issues'), list) else []
     pass1_recommendations = pass1_result.get('recommendations') if isinstance(pass1_result.get('recommendations'), list) else []
@@ -2002,6 +2151,15 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         pass1_result['correction_plan'] = pass1_result.get('correction_plan') if isinstance(pass1_result.get('correction_plan'), dict) else {}
         pass1_result['second_pass'] = {'status': 'skipped'}
         pass1_result['route'] = route
+        pass1_result['section_analyses'] = retrieval_context.get('section_fusion', [])
+        pass1_result['rag_context'] = retrieval_context
+        pass1_result['pipeline'] = {
+            'stage': 'pass1_diagnostic_completed',
+            'chunks_count': len(chunks),
+            'retrieved_chunks_count': retrieval_context.get('retrieved_chunks_count', 0),
+            'retrieval': retrieval_context.get('retrieval_policy'),
+            'vector_store': retrieval_context.get('vector_store', {}),
+        }
         return pass1_result
 
     _notify_progress('Analyse LLM - passe 2/2 (plan de correction)...')
@@ -2043,6 +2201,15 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         'attempt': pass1_result.get('attempt'),
         'second_pass': {},
         'route': route,
+        'section_analyses': retrieval_context.get('section_fusion', []),
+        'rag_context': retrieval_context,
+        'pipeline': {
+            'stage': 'pass2_correction_plan',
+            'chunks_count': len(chunks),
+            'retrieved_chunks_count': retrieval_context.get('retrieved_chunks_count', 0),
+            'retrieval': retrieval_context.get('retrieval_policy'),
+            'vector_store': retrieval_context.get('vector_store', {}),
+        },
     }
 
     if pass2_result.get('unavailable'):

@@ -14,6 +14,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 
 function Connexion() {
   const [email, setEmail] = useState('admin@hopital.com');
@@ -23,6 +24,7 @@ function Connexion() {
   const [loading, setLoading] = useState(false);
   const { login: connexion, user: utilisateur } = useContext(AuthContext);
   const navigate = useNavigate();
+  const { t } = useLanguage();
 
   if (utilisateur) {
     return <Navigate to="/dashboard" replace />;
@@ -37,7 +39,7 @@ function Connexion() {
       await connexion(email.trim(), password);
       navigate('/dashboard');
     } catch (err) {
-      setError('Identifiants incorrects. Veuillez réessayer.');
+      setError(t('loginErrorInvalid') || 'Identifiants incorrects. Veuillez réessayer.');
     } finally {
       setLoading(false);
     }
@@ -134,20 +136,20 @@ function Connexion() {
           >
             <Box sx={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top left, rgba(124, 58, 237, 0.12), transparent 24%), radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.08), transparent 20%)', pointerEvents: 'none' }} />
             <Box sx={{ position: 'relative', zIndex: 1 }}>
-              <Typography
-                variant="h5"
-                sx={{
-                  fontWeight: 700,
-                  mb: 1,
-                  color: '#0f2641',
-                  textAlign: 'center', // Center align the text
-                }}
-              >
-                Connexion
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#64748b', mb: 5 }}>
-                Connectez-vous pour continuer vers l’espace patient sécurisé.
-              </Typography>
+                <Typography
+                  variant="h5"
+                  sx={{
+                    fontWeight: 700,
+                    mb: 1,
+                    color: '#0f2641',
+                    textAlign: 'center', // Center align the text
+                  }}
+                >
+                  {t('loginTitle')}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#64748b', mb: 5 }}>
+                  {t('loginSubtitle')}
+                </Typography>
 
               {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 3 }}>{error}</Alert>}
 
@@ -155,8 +157,8 @@ function Connexion() {
                 <TextField
                   required
                   fullWidth
-                  label="Email"
-                  placeholder="admin@hopital.com"
+                  label={t('emailLabel')}
+                  placeholder={t('emailPlaceholder') || 'admin@hopital.com'}
                   name="email"
                   autoComplete="email"
                   value={email}
@@ -173,8 +175,8 @@ function Connexion() {
                 <TextField
                   required
                   fullWidth
-                  label="Mot de passe"
-                  placeholder="••••••••••••••"
+                  label={t('passwordLabel')}
+                  placeholder={t('passwordPlaceholder') || '••••••••••••••'}
                   type="password"
                   name="password"
                   autoComplete="current-password"
@@ -212,7 +214,7 @@ function Connexion() {
                     },
                   }}
                 >
-                  Connexion <ArrowForwardIosIcon sx={{ fontSize: '1rem' }} />
+                  {t('loginButton')} <ArrowForwardIosIcon sx={{ fontSize: '1rem' }} />
                 </Box>
               </Box>
 

@@ -316,12 +316,6 @@
       "index": 30
     },
     {
-      "field_type": "nombre entier",
-      "key": "irc_duree_suivi_predialytique_mois",
-      "possible_values": [],
-      "index": 31
-    },
-    {
       "field_type": "liste à choix multiple",
       "key": "irc_themes_education_therapeutique",
       "possible_values": [

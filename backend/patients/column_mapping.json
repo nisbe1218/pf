@@ -1,0 +1,403 @@
+[
+  {
+    "main": "identifiant_patient",
+    "platform": "id_patient",
+    "transformation": "direct"
+  },
+  {
+    "main": "sexe",
+    "platform": "demographie_sexe",
+    "transformation": "direct"
+  },
+  {
+    "main": "age_annees",
+    "platform": "demographie_date_naissance",
+    "transformation": "calcul (age → date naissance estimée)"
+  },
+  {
+    "main": "age",
+    "platform": "demographie_date_naissance",
+    "transformation": "calcul (age → date naissance estimée)"
+  },
+  {
+    "main": "Age",
+    "platform": "demographie_date_naissance",
+    "transformation": "calcul (age → date naissance estimée)"
+  },
+  {
+    "main": "age_ans",
+    "platform": "demographie_date_naissance",
+    "transformation": "calcul (age → date naissance estimée)"
+  },
+  {
+    "main": "patient_age",
+    "platform": "demographie_date_naissance",
+    "transformation": "calcul (age → date naissance estimée)"
+  },
+  {
+    "main": "distance_au_centre",
+    "platform": "demographie_distance_centre_km",
+    "transformation": "direct"
+  },
+  {
+    "main": "etiologie_mrc",
+    "platform": "irc_etiologie_principale",
+    "transformation": "direct"
+  },
+  {
+    "main": "biopsie_renale",
+    "platform": "irc_statut_biopsie_renale",
+    "transformation": "direct"
+  },
+  {
+    "main": "maladie_renale_hereditaire",
+    "platform": "irc_maladie_renale_hereditaire",
+    "transformation": "direct"
+  },
+  {
+    "main": "debut_dialyse_urgence",
+    "platform": "irc_contexte_debut_dialyse",
+    "transformation": "fusion (urgence/planifié → contexte)"
+  },
+  {
+    "main": "debut_dialyse_planifie",
+    "platform": "irc_contexte_debut_dialyse",
+    "transformation": "fusion (urgence/planifié → contexte)"
+  },
+  {
+    "main": "education_therapeutique",
+    "platform": "irc_themes_education_therapeutique",
+    "transformation": "direct"
+  },
+  {
+    "main": "comprehension_maladie",
+    "platform": "irc_niveau_comprehension_patient",
+    "transformation": "direct"
+  },
+  {
+    "main": "connaissance_therapie_substitution",
+    "platform": "irc_preference_therapie_renale",
+    "transformation": "direct"
+  },
+  {
+    "main": "Charlson",
+    "platform": "icc_charlson",
+    "transformation": "direct"
+  },
+  {
+    "main": "hypertension",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "cardiopathie",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "uropathie_obstructive",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "goutte",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "exposition_toxique",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "antecedents_medicaments_nephrotoxiques",
+    "platform": "comorbidite_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "asthenie",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "douleur_abdominale",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "nausees",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "prurit",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "asymptomatique",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "trouble_conscience",
+    "platform": "presentation_symptomes",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "uree_basale",
+    "platform": "biologie_uree_g_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "creatinine_basale",
+    "platform": "biologie_creatinine_mg_l",
+    "transformation": "direct"
+  },
+  
+  {
+    "main": "hemoglobine_basale",
+    "platform": "biologie_hemoglobine_g_dl",
+    "transformation": "direct"
+  },
+  {
+    "main": "albumine_basale",
+    "platform": "biologie_albumine_g_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "potassium_basale",
+    "platform": "biologie_potassium_mmol_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "calcium_basale",
+    "platform": "biologie_calcium_corrige_mg_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "phosphore_basale",
+    "platform": "biologie_phosphore_mg_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "bicarbonates_basaux",
+    "platform": "biologie_bicarbonates_mmol_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "sodium_basal",
+    "platform": "biologie_sodium_mmol_l",
+    "transformation": "direct"
+  },
+  {
+    "main": "pth_basale",
+    "platform": "biologie_pth_pg_ml",
+    "transformation": "direct"
+  },
+  {
+    "main": "ferritine_basale",
+    "platform": "biologie_ferritine_ng_ml",
+    "transformation": "direct"
+  },
+  {
+    "main": "vitamine_d_basale",
+    "platform": "biologie_vitamine_d_ng_ml",
+    "transformation": "direct"
+  },
+  {
+    "main": "proteinurie_basale",
+    "platform": "biologie_proteinurie_g_24h",
+    "transformation": "direct"
+  },
+  {
+    "main": "date_debut_dialyse",
+    "platform": "dialyse_date_debut",
+    "transformation": "direct"
+  },
+  {
+    "main": "hemodialyse",
+    "platform": "dialyse_modalite_initiale",
+    "transformation": "fusion (hd/dp → modalité)"
+  },
+  {
+    "main": "dialyse_peritoneale",
+    "platform": "dialyse_modalite_initiale",
+    "transformation": "fusion (hd/dp → modalité)"
+  },
+  {
+    "main": "type_acces_initial",
+    "platform": "dialyse_type_acces_initial",
+    "transformation": "direct"
+  },
+  {
+    "main": "cathetere_femoral",
+    "platform": "dialyse_acces_admission_femoral",
+    "transformation": "direct"
+  },
+  {
+    "main": "cathetere_tunnellise",
+    "platform": "dialyse_acces_admission_tunnelise",
+    "transformation": "direct"
+  },
+  {
+    "main": "fistule_arterioveineuse",
+    "platform": "dialyse_acces_admission_fav",
+    "transformation": "direct"
+  },
+  {
+    "main": "cathetere_peritoneal",
+    "platform": "dialyse_acces_admission_peritoneale",
+    "transformation": "direct"
+  },
+  {
+    "main": "acces_a_admission_centre",
+    "platform": "dialyse_type_acces_initial",
+    "transformation": "direct"
+  },
+  {
+    "main": "admission_cathetere_tunnellise",
+    "platform": "dialyse_acces_admission_tunnelise",
+    "transformation": "direct"
+  },
+  {
+    "main": "admission_cathetere_femoral",
+    "platform": "dialyse_acces_admission_femoral",
+    "transformation": "direct"
+  },
+  {
+    "main": "admission_fistule_arterioveineuse",
+    "platform": "dialyse_acces_admission_fav",
+    "transformation": "direct"
+  },
+  {
+    "main": "admission_cathetere_peritoneal",
+    "platform": "dialyse_acces_admission_peritoneale",
+    "transformation": "direct"
+  },
+  {
+    "main": "jours_entre_cathetere_et_fistule_arterioveineuse",
+    "platform": "dialyse_jours_entre_catheter_et_fav",
+    "transformation": "direct"
+  },
+  {
+    "main": "fistule_arterioveineuse_creee",
+    "platform": "dialyse_acces_admission_fav",
+    "transformation": "direct"
+  },
+  {
+    "main": "seances_par_semaine",
+    "platform": "dialyse_seances_par_semaine",
+    "transformation": "direct"
+  },
+  {
+    "main": "information_transplantation",
+    "platform": "dialyse_information_transplantation_donnee",
+    "transformation": "direct"
+  },
+  {
+    "main": "information_transplantation_donnee",
+    "platform": "dialyse_information_transplantation_donnee",
+    "transformation": "direct"
+  },
+  {
+    "main": "liste_attente_transplantation",
+    "platform": "dialyse_statut_liste_attente_transplantation",
+    "transformation": "direct"
+  },
+  {
+    "main": "bilan_pretransplantation",
+    "platform": "transplantation_bilan_pretransplantation",
+    "transformation": "direct"
+  },
+  {
+    "main": "immunisation_transfusion_sanguine",
+    "platform": "immunologie_transfusion_immunisation",
+    "transformation": "direct"
+  },
+  {
+    "main": "transplantation_renale",
+    "platform": "devenir_date_transplantation",
+    "transformation": "partiel (oui/non → date)"
+  },
+  {
+    "main": "transplantation",
+    "platform": "devenir_date_transplantation",
+    "transformation": "direct"
+  },
+  {
+    "main": "infection",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "trouble_electrolytique",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "evenement_cardiovasculaire",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "hemorragie",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "dysfonction_acces",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "crise_convulsive",
+    "platform": "complication_liste",
+    "transformation": "fusion (valeurs multiples → liste)"
+  },
+  {
+    "main": "jours_hospitalisation",
+    "platform": "complication_jours_hospitalisation",
+    "transformation": "direct"
+  },
+  {
+    "main": "nombre_hospitalisations",
+    "platform": "complication_nombre_hospitalisations",
+    "transformation": "direct"
+  },
+  {
+    "main": "changement_hd_vers_dp",
+    "platform": "complication_changement_modalite_dialyse",
+    "transformation": "fusion (hd→dp / dp→hd → changement)"
+  },
+  {
+    "main": "changement_dp_vers_hd",
+    "platform": "complication_changement_modalite_dialyse",
+    "transformation": "fusion (hd→dp / dp→hd → changement)"
+  },
+  {
+    "main": "deces",
+    "platform": "devenir_statut",
+    "transformation": "inclus dans statut devenir"
+  },
+  {
+    "main": "date_deces",
+    "platform": "devenir_date_deces",
+    "transformation": "direct"
+  },
+  {
+    "main": "cause_deces",
+    "platform": "devenir_cause_deces",
+    "transformation": "direct"
+  },
+  {
+    "main": "cause_deces_cardiaque",
+    "platform": "devenir_cause_deces",
+    "transformation": "fusion (cardiaque/infectieux → cause)"
+  },
+  {
+    "main": "cause_deces_infectieuse",
+    "platform": "devenir_cause_deces",
+    "transformation": "fusion (cardiaque/infectieux → cause)"
+  }
+]

@@ -2,9 +2,12 @@
 import { useNavigate } from 'react-router-dom';
 import { Box, Button, Grid, Stack, Typography } from '@mui/material';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
+import { useLanguage } from '../../context/LanguageContext';
 
 function Landing() {
   const navigate = useNavigate();
+
+  const { t } = useLanguage();
 
   return (
     <Box
@@ -51,13 +54,13 @@ function Landing() {
             mb: 3,
             display: 'inline-block',
           }}>
-            AI NéphroCare
+                  AI NéphroCare
           </Typography>
           <Typography variant="h1" sx={{ fontWeight: 900, lineHeight: 1.02, mb: 3, maxWidth: 600, fontSize: { xs: '3rem', md: '4.2rem' } }}>
-            Bienvenue dans votre espace santé
+            {t('landingTitle')}
           </Typography>
           <Typography variant="h6" sx={{ color: '#e7f2fb', maxWidth: 580, mb: 4, lineHeight: 1.8 }}>
-            Ouvrez votre compte sécurisé pour accéder à vos dossiers patients, vos analyses et vos outils de suivi médical.
+            {t('landingSubtitle')}
           </Typography>
 
           <Button
@@ -76,7 +79,7 @@ function Landing() {
             }}
             endIcon={<ArrowForwardIosIcon />}
           >
-            Commencer
+            {t('landingCTA')}
           </Button>
         </Grid>
 

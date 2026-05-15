@@ -36,17 +36,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AppSidebar from '../../components/common/AppSidebar';
 import api from '../../services/api/axios';
 import { AuthContext } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 
 // ── Constantes ───────────────────────────────────────────────────────────────
-
-const MODULE_TABS = [
-  'Tableau de bord',
-  'Sélection patient',
-  'Lancer prédiction',
-  'Résultats',
-  'Historique',
-  'Gestion modèles',
-];
 
 const PREDICTION_TYPES = [
   {
@@ -72,10 +64,35 @@ const MODEL_OPTIONS = [
   { value: 'decision_tree', label: 'Arbre de décision', description: 'Explicable, idéal pour la formation médicale' },
 ];
 
-// Recommandations synchronisées avec le backend (RECOMMENDATIONS dans views.py)
 const MODEL_RECOMMENDATIONS = {
   mortalite: ['random_forest', 'extra_trees', 'adaboost', 'gradient_boosting', 'xgboost'],
   coagulation: ['logistic_regression', 'svm', 'gradient_boosting'],
+};
+
+const ROSE_ACCENT = {
+  soft: '#e8c4d4',
+  mid: '#c97b99',
+  deep: '#9e3d6a',
+};
+
+const SURFACE_CARD_SX = {
+  borderRadius: 5,
+  border: '1px solid rgba(201,123,153,0.18)',
+  background: 'linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,246,250,.92))',
+  boxShadow: '0 18px 48px rgba(24,35,68,.08)',
+  backdropFilter: 'blur(16px)',
+  transition: 'transform .22s ease, box-shadow .22s ease',
+  '&:hover': {
+    transform: 'translateY(-2px)',
+    boxShadow: '0 20px 52px rgba(158,61,106,.14)',
+  },
+};
+
+const PANEL_SX = {
+  borderRadius: 4,
+  border: '1px solid rgba(201,123,153,0.16)',
+  background: 'rgba(255,252,255,.84)',
+  boxShadow: '0 14px 36px rgba(24,35,68,.06)',
 };
 
 const RISK_COLORS = {
@@ -85,8 +102,6 @@ const RISK_COLORS = {
 };
 
 const RISK_THRESHOLDS = { Faible: 30, Modéré: 70 };
-
-// ── Labels lisibles pour toutes les variables ─────────────────────────────────
 
 const VARIABLE_LABELS = {
   adresse: 'Adresse',
@@ -250,8 +265,6 @@ const VARIABLE_LABELS = {
   immunologie_transfusion_immunisation: 'Immunologie - transfusion/immunisation',
 };
 
-// ── Groupes de variables par section ─────────────────────────────────────────
-
 const VARIABLE_GROUPS = [
   {
     title: 'Données biologiques',
@@ -404,13 +417,13 @@ const CORE_VARIABLE_KEYS = [
 
 function ModuleCard({ title, description, children }) {
   return (
-    <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94,115,141,0.14)' }}>
-      <CardContent>
-        <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>
+    <Card elevation={0} sx={SURFACE_CARD_SX}>
+      <CardContent sx={{ p: 3 }}>
+        <Typography variant="h6" fontWeight={900} sx={{ mb: 0.5, letterSpacing: '-.02em', color: '#15213d' }}>
           {title}
         </Typography>
         {description && (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
             {description}
           </Typography>
         )}
@@ -420,10 +433,80 @@ function ModuleCard({ title, description, children }) {
   );
 }
 
+// KPI Card amélioré - Taille réduite, design moderne
+function KpiCard({ title, description, value, valueColor, icon: Icon }) {
+  return (
+    <Card
+      elevation={0}
+      sx={{
+        ...SURFACE_CARD_SX,
+        minHeight: 130,
+        position: 'relative',
+        overflow: 'hidden',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        '&:hover': {
+          transform: 'translateY(-4px)',
+          boxShadow: '0 24px 60px rgba(158,61,106,.18)',
+        },
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: '0 0 auto 0',
+          height: 3,
+          background: 'linear-gradient(90deg, rgba(61,90,138,.85), rgba(201,123,153,.8))',
+        },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          top: -35,
+          right: -35,
+          width: 100,
+          height: 100,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(201,123,153,.08), transparent 70%)',
+          pointerEvents: 'none',
+        },
+      }}
+    >
+      <CardContent sx={{ p: 2, position: 'relative', zIndex: 1 }}>
+        <Stack spacing={0.5}>
+          <Typography variant="overline" fontWeight={700} sx={{ color: '#62708b', letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+            {title}
+          </Typography>
+          <Typography variant="h4" fontWeight={900} sx={{ color: valueColor || '#1f6c8a', lineHeight: 1.1 }}>
+            {value}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', lineHeight: 1.4 }}>
+            {description}
+          </Typography>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Composant principal ───────────────────────────────────────────────────────
 
 function ModelAI() {
   const { user } = useContext(AuthContext);
+  const { language } = useLanguage();
+  const isEnglish = language === 'en';
+  const moduleTabs = isEnglish
+    ? ['Dashboard', 'Patient selection', 'Run prediction', 'Results']
+    : ['Tableau de bord', 'Sélection patient', 'Lancer prédiction', 'Résultats'];
+  const moduleDescription = isEnglish
+    ? [
+        'Overview of the service with indicators and high-priority patient alerts.',
+        'Fast patient search, filtered by service and status.',
+        '4 steps: prediction type -> variable selection -> model choice -> execution.',
+        'Displays the score, risk level, and variable-level explainability.',
+      ]
+    : [
+        'Vue globale du service avec indicateurs et alertes patients prioritaires.',
+        'Recherche rapide de patient, filtres par service et statut.',
+        '4 étapes : type de prédiction → sélection des variables → choix du modèle → exécution.',
+        'Affichage du score, du niveau de risque et de l\'interprétabilité par variable.',
+      ];
 
   // Navigation
   const [activeModule, setActiveModule] = useState(0);
@@ -456,11 +539,6 @@ function ModelAI() {
   const [predictionError, setPredictionError] = useState('');
   const [missingVariables, setMissingVariables] = useState([]);
 
-  // Historique
-  const [predictionHistory, setPredictionHistory] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [selectedDateFilter, setSelectedDateFilter] = useState('30jours');
-
   // Métriques modèles
   const [modelMetrics, setModelMetrics] = useState({});
   const [xgboostAvailable, setXgboostAvailable] = useState(false);
@@ -472,11 +550,15 @@ function ModelAI() {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  const roleName =
-    user?.role === 'professeur' ? 'Professeur'
+  const roleName = isEnglish
+    ? (user?.role === 'professeur' ? 'Professor'
+      : user?.role === 'chef_service' ? 'Service head'
+        : user?.role === 'super_admin' ? 'Administrator'
+          : 'User')
+    : (user?.role === 'professeur' ? 'Professeur'
       : user?.role === 'chef_service' ? 'Chef de service'
         : user?.role === 'super_admin' ? 'Administrateur'
-          : 'Utilisateur';
+          : 'Utilisateur');
 
   const formatVariableLabel = useCallback((key) => {
     if (VARIABLE_LABELS[key]) return VARIABLE_LABELS[key];
@@ -680,28 +762,6 @@ function ModelAI() {
     };
   }, []);
 
-  // ── Chargement historique ──────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (activeModule !== 4) return;
-    const loadHistory = async () => {
-      setLoadingHistory(true);
-      const daysMap = { '7jours': 7, '30jours': 30, '90jours': 90 };
-      const days = daysMap[selectedDateFilter] || 30;
-      try {
-        const response = await api.get(`predictions/history/?days=${days}`);
-        const list = Array.isArray(response.data) ? response.data : response.data.results || [];
-        setPredictionHistory(list);
-      } catch (error) {
-        console.error('Chargement historique', error);
-        setPredictionHistory([]);
-      } finally {
-        setLoadingHistory(false);
-      }
-    };
-    loadHistory();
-  }, [activeModule, selectedDateFilter]);
-
   // ── Chargement métriques modèles ──────────────────────────────────────────
 
   useEffect(() => {
@@ -756,7 +816,6 @@ function ModelAI() {
 
   const handleSelectPatient = (patient) => {
     setSelectedPatientId(patient.id);
-    // Réinitialiser les variables sélectionnées à chaque changement de patient
     setSelectedVariableKeys(new Set());
     setPredictionError('');
     setMissingVariables([]);
@@ -802,7 +861,6 @@ function ModelAI() {
   const validatePredictionInput = useCallback(() => {
     if (!selectedPatient) return false;
     if (selectedVariableKeys.size === 0) return false;
-    // Toutes les variables sélectionnées doivent avoir une valeur non vide
     for (const key of selectedVariableKeys) {
       const val = getPatientFieldValue(selectedPatient, key);
       if (val === null || val === undefined || val === '') return false;
@@ -819,13 +877,11 @@ function ModelAI() {
       const rawValue = getPatientFieldValue(selectedPatient, fieldKey);
       if (rawValue === '') continue;
 
-      // Mapper demographie_age_ans → age et demographie_sexe → sexe
       const targetKey =
         fieldKey === 'demographie_age_ans' ? 'age'
           : fieldKey === 'demographie_sexe' ? 'sexe'
             : fieldKey;
 
-      // Tenter la conversion numérique
       const numeric = Number(String(rawValue).replace(',', '.'));
       payload[targetKey] = Number.isNaN(numeric) ? rawValue : numeric;
     }
@@ -848,7 +904,6 @@ function ModelAI() {
       return;
     }
 
-    // Identifier les variables sélectionnées sans valeur
     const missing = [...selectedVariableKeys].filter(
       (key) => !getPatientFieldValue(selectedPatient, key),
     );
@@ -878,7 +933,6 @@ function ModelAI() {
 
       const data = response.data;
 
-      // Normalisation du risk_level (en cas de valeur anglophone)
       const normalizeRiskLevel = (level) => {
         if (!level) return '';
         const map = {
@@ -927,7 +981,6 @@ function ModelAI() {
     try {
       const response = await api.post('predictions/train/', {
         prediction_type: selectedPredictionType,
-        // On peut envoyer les variables actuellement sélectionnées comme feature_keys
         ...(selectedVariableKeys.size > 0 && {
           feature_keys: [...selectedVariableKeys],
         }),
@@ -956,8 +1009,7 @@ function ModelAI() {
             ...(metricsResponse.data.models || {}),
           }));
         } catch {
-          // Si les métriques persistées ne sont pas encore disponibles,
-          // on conserve celles issues du rapport d'entraînement.
+          // Conservation des métriques issues du rapport
         }
       }
     } catch (error) {
@@ -976,7 +1028,7 @@ function ModelAI() {
     }
   };
 
-  // ── Recommandation locale (fallback si le backend ne renvoie pas de texte) ──
+  // ── Recommandation locale ──────────────────────────────────────────────────
 
   const buildLocalRecommendation = (level) => {
     if (level === 'Élevé') {
@@ -988,17 +1040,6 @@ function ModelAI() {
     return 'Risque faible : maintien du suivi standard avec contrôle périodique.';
   };
 
-  // ── Description des modules ────────────────────────────────────────────────
-
-  const moduleDescription = [
-    'Vue globale du service avec indicateurs et alertes patients prioritaires.',
-    'Recherche rapide de patient, filtres par service et statut.',
-    '4 étapes : type de prédiction → sélection des variables → choix du modèle → exécution.',
-    'Affichage du score, du niveau de risque et de l\'interprétabilité par variable.',
-    'Historique des prédictions filtrable et traçabilité complète.',
-    'Gestion des modèles ML, entraînement et métriques de performance.',
-  ];
-
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
   return (
@@ -1006,897 +1047,675 @@ function ModelAI() {
       sx={{
         minHeight: '100vh',
         py: 2,
-        background:
-          'radial-gradient(circle at top left, rgba(77, 142, 166, 0.12), transparent 24%), linear-gradient(180deg, #f2f7fb 0%, #edf3f8 100%)',
+        position: 'relative',
+        overflow: 'hidden',
+        background: [
+          'radial-gradient(circle at top left, rgba(168,207,238,.42), transparent 30%)',
+          'radial-gradient(circle at 85% 10%, rgba(158,61,106,.12), transparent 26%)',
+          'radial-gradient(circle at 70% 92%, rgba(61,90,138,.10), transparent 24%)',
+          'linear-gradient(160deg,#f5eef4 0%,#edf4fb 46%,#f7f4ff 100%)',
+        ].join(', '),
+        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: '12% auto auto -8%',
+          width: 320,
+          height: 320,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(255,255,255,.65), rgba(255,255,255,0) 68%)',
+          filter: 'blur(8px)',
+          pointerEvents: 'none',
+        },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          inset: 'auto -6% -10% auto',
+          width: 420,
+          height: 420,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(255,255,255,.52), rgba(255,255,255,0) 70%)',
+          filter: 'blur(12px)',
+          pointerEvents: 'none',
+        },
       }}
     >
-      <Grid container spacing={2} alignItems="flex-start">
-        <Grid item xs={12} md={3} lg={2}>
-          <AppSidebar />
-        </Grid>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');`}</style>
+      <Box sx={{ width: '100%', position: 'relative', zIndex: 1 }}>
+        <AppSidebar />
 
-        <Grid item xs={12} md={9} lg={10}>
-          <Stack spacing={3}>
-            {/* En-tête */}
-            <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94,115,141,0.14)' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems="center" spacing={2}>
-                  <Box>
-                    <Typography variant="h5" fontWeight={900}>
-                      Interface des modèles de Machine Learning
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      Aide à la décision clinique — Pathologies rénales
-                    </Typography>
-                  </Box>
-                  <Chip label={roleName} color="primary" sx={{ fontWeight: 700 }} />
-                </Stack>
-              </CardContent>
-            </Card>
-
-            {/* Navigation */}
-            <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(94,115,141,0.14)' }}>
-              <CardContent>
-                <Tabs value={activeModule} onChange={(_, v) => setActiveModule(v)} variant="scrollable" allowScrollButtonsMobile>
-                  {MODULE_TABS.map((label, index) => (
-                    <Tab key={label} value={index} label={label} />
-                  ))}
-                </Tabs>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                  {moduleDescription[activeModule]}
-                </Typography>
-              </CardContent>
-            </Card>
-
-            {/* ── TABLEAU DE BORD ── */}
-            {activeModule === 0 && (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={3}>
-                  <ModuleCard title="Patients suivis" description="Volume total dans la base">
-                    <Typography variant="h3" fontWeight={900}>{patients.length}</Typography>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <ModuleCard title="Haut risque" description="Alertes patients prioritaires">
-                    <Typography variant="h3" fontWeight={900} color="#D4433D">{highRiskPatients.length}</Typography>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <ModuleCard title="Patients récents" description="Arrivés dans les 30 derniers jours">
-                    <Typography variant="h3" fontWeight={900}>{recentPatientsCount}</Typography>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <ModuleCard title="Taux validés" description="Pourcentage de patients validés">
-                    <Typography variant="h3" fontWeight={900} color="#2B7A6B">{validationRate}%</Typography>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12}>
-                  <ModuleCard title="Alertes haut risque" description="Lancer un dossier en un clic.">
-                    <Stack spacing={2}>
-                      {highRiskPatients.length ? (
-                        highRiskPatients.slice(0, 3).map((patient) => {
-                          const reason = [];
-                          if (['oui', 'true', '1'].includes(String(patient.infection || '').toLowerCase())) reason.push('Infection');
-                          if (['oui', 'true', '1'].includes(String(patient.hemorrhage || '').toLowerCase())) reason.push('Hémorragie');
-                          if (['oui', 'true', '1'].includes(String(patient.avf_created || '').toLowerCase())) reason.push('AVF');
-                          if (!reason.length) reason.push('Statut critique');
-                          return (
-                            <Button key={patient.id} variant="outlined" fullWidth onClick={() => handleSelectPatient(patient)}>
-                              {patient.nom || 'Patient'} {patient.prenom || ''} — {reason.join(' / ')}
-                            </Button>
-                          );
-                        })
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">Aucune alerte haut risque détectée.</Typography>
-                      )}
-                    </Stack>
-                  </ModuleCard>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* ── SÉLECTION PATIENT ── */}
-            {activeModule === 1 && (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={4}>
-                  <ModuleCard title="Recherche du patient" description="Recherchez par nom, prénom ou identifiant.">
-                    <Stack spacing={2}>
-                      <TextField label="Nom ou prénom" value={patientCriteria.search} onChange={(e) => handleSearchChange('search', e.target.value)} fullWidth size="small" />
-                      <TextField label="ID patient" value={patientCriteria.id} onChange={(e) => handleSearchChange('id', e.target.value)} fullWidth size="small" />
-                      <TextField select label="Sexe" value={patientCriteria.sexe} onChange={(e) => handleSearchChange('sexe', e.target.value)} fullWidth size="small">
-                        <MenuItem value="">Tous</MenuItem>
-                        <MenuItem value="M">Homme</MenuItem>
-                        <MenuItem value="F">Femme</MenuItem>
-                        <MenuItem value="O">Autre</MenuItem>
-                      </TextField>
-                    </Stack>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12} md={8}>
-                  <ModuleCard title="Résultats de recherche" description="Cliquez sur un patient pour accéder à sa fiche.">
-                    {loadingPatients ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                        <CircularProgress size={32} />
-                      </Box>
-                    ) : displayPatients.length ? (
-                      <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3 }}>
-                        <Table size="small">
-                          <TableHead sx={{ backgroundColor: 'rgba(226,237,244,0.9)' }}>
-                            <TableRow>
-                              <TableCell sx={{ fontWeight: 700 }}>ID patient</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Nom</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Prénom</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Sexe</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Site</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Âge</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>Statut</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {displayPatients.map((patient) => (
-                              <TableRow
-                                key={patient.id}
-                                hover
-                                sx={{ cursor: 'pointer', bgcolor: String(patient.id) === String(selectedPatientId) ? 'rgba(57,151,118,0.08)' : 'inherit' }}
-                                onClick={() => handleSelectPatient(patient)}
-                              >
-                                <TableCell>{patient.id_patient || '-'}</TableCell>
-                                <TableCell>{patient.nom || '-'}</TableCell>
-                                <TableCell>{patient.prenom || '-'}</TableCell>
-                                <TableCell>{patient.sexe || patient.sex || '-'}</TableCell>
-                                <TableCell>{patient.id_site || '-'}</TableCell>
-                                <TableCell>{patient.age || patient.demographie_age_ans || '-'}</TableCell>
-                                <TableCell>{patient.statut_inclusion || '-'}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">Aucun patient trouvé.</Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* ── LANCER PRÉDICTION ── */}
-            {activeModule === 2 && (
-              <Grid container spacing={3}>
-                {/* Type de prédiction */}
-                <Grid item xs={12}>
-                  <Paper variant="outlined" sx={{ p: 3, borderRadius: 3 }}>
-                    <Typography variant="h6" fontWeight={700}>Étape 1 — Type de prédiction</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2 }}>
-                      Choisissez le type de prédiction à effectuer.
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {PREDICTION_TYPES.map((type) => (
-                        <Tooltip key={type.value} title={type.detail} arrow>
-                          <Button
-                            variant={selectedPredictionType === type.value ? 'contained' : 'outlined'}
-                            color={selectedPredictionType === type.value ? 'success' : 'inherit'}
-                            onClick={() => setSelectedPredictionType(type.value)}
-                            sx={{ textTransform: 'none' }}
-                          >
-                            {type.label}
-                          </Button>
-                        </Tooltip>
-                      ))}
+        <Box sx={{ minWidth: 0, pl: { xs: 1, md: '112px' }, pr: { xs: 1.5, md: 3 }, pb: 2 }}>
+          <Box sx={{ width: '100%', maxWidth: 1680, mx: 'auto' }}>
+            <Stack spacing={3}>
+              {/* En-tête */}
+              <Card elevation={0} sx={{
+                ...SURFACE_CARD_SX,
+                borderRadius: '30px',
+                position: 'relative',
+                overflow: 'hidden',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  inset: '0 0 auto 0',
+                  height: 5,
+                  background: 'linear-gradient(90deg,#a8cfee,#3d5a8a,#9e3d6a,#e8c4d4)',
+                },
+                '&::after': {
+                  content: '""',
+                  position: 'absolute',
+                  top: -60,
+                  right: -60,
+                  width: 190,
+                  height: 190,
+                  borderRadius: '50%',
+                  background: 'radial-gradient(circle, rgba(158,61,106,.10), transparent 68%)',
+                  pointerEvents: 'none',
+                },
+              }}>
+                <CardContent sx={{ p: 3.5, position: 'relative' }}>
+                  <Box
+                    component="img"
+                    src="/images/chatgpt-image-2026-04-23.png"
+                    alt="decor"
+                    sx={{
+                      position: 'absolute',
+                      left: 16,
+                      top: 12,
+                      width: 152,
+                      maxWidth: '36%',
+                      opacity: 0.16,
+                      transform: 'translateZ(0)',
+                      zIndex: 0,
+                      pointerEvents: 'none',
+                      filter: 'drop-shadow(0 8px 20px rgba(158,61,106,0.10)) saturate(1.05) contrast(1.04)',
+                    }}
+                  />
+                  <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={2.5} sx={{ position: 'relative', zIndex: 1 }}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="h5" sx={{ fontWeight: 900, color: '#1e2d5a', letterSpacing: '-.02em', fontFamily: 'inherit' }}>
+                        Des modèles de Machine Learning
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 0.5, color: '#3d5a8a', fontFamily: 'inherit' }}>
+                        Aide à la décision clinique — Pathologies rénales
+                      </Typography>
                     </Box>
-                  </Paper>
-                </Grid>
-
-                {/* Fiche patient + sélection variables */}
-                <Grid item xs={12} md={8}>
-                  <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, minHeight: 680 }}>
-                    <Typography variant="subtitle1" fontWeight={700}>Étape 2 — Sélection des variables</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      Cochez les variables disponibles du patient à utiliser pour la prédiction. Seules les variables avec une valeur sont activées.
-                    </Typography>
-
-                    {selectedPatient ? (
-                      <Stack spacing={2}>
-                        {/* Identité patient */}
-                        <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
-                          <Stack direction="row" spacing={2} alignItems="center">
-                            <Avatar sx={{ bgcolor: '#E1F5EE', color: '#0F6E56', fontWeight: 700, width: 48, height: 48 }}>
-                              {selectedPatient.nom?.[0] || 'P'}
-                            </Avatar>
-                            <Box>
-                              <Typography variant="subtitle1" fontWeight={700}>
-                                {selectedPatient.nom || ''} {selectedPatient.prenom || ''}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                ID : {selectedPatient.id_patient || selectedPatient.id || '-'} · Site : {selectedPatient.id_site || '-'}
-                              </Typography>
-                            </Box>
-                          </Stack>
-                          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1.5 }}>
-                            {selectedPatient.dialyse_modalite_actuelle && (
-                              <Chip label={selectedPatient.dialyse_modalite_actuelle} size="small" sx={{ bgcolor: '#E1F5EE', color: '#0F6E56' }} />
-                            )}
-                            {selectedPatient.statut_inclusion && (
-                              <Chip label={selectedPatient.statut_inclusion} size="small" sx={{ bgcolor: '#E6F1FB', color: '#185FA5' }} />
-                            )}
-                          </Stack>
-                        </Paper>
-
-                        <TextField
-                          label="Rechercher une variable"
-                          size="small"
-                          value={variableSearch}
-                          onChange={(e) => setVariableSearch(e.target.value)}
-                          fullWidth
-                          sx={{ mb: 2 }}
-                        />
-
-                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={handleSelectAllVariables}
-                            disabled={!selectedPatient || filteredVariableGroups.every((section) => section.fields.length === 0)}
-                          >
-                            Tout sélectionner
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={handleDeselectAllVariables}
-                            disabled={selectedVariableKeys.size === 0}
-                          >
-                            Tout désélectionner
-                          </Button>
-                        </Stack>
-
-                        {filteredVariableGroups.map((section) => (
-                          <Accordion key={section.title} disableGutters sx={{ borderRadius: 2, border: '1px solid rgba(94,115,141,0.14)', boxShadow: 'none' }}>
-                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 2, py: 1 }}>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                                <Typography variant="subtitle2" fontWeight={700}>{section.title}</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {section.fields.filter((k) => selectedVariableKeys.has(k)).length} sélectionné(s) / {section.fields.length}
-                                </Typography>
-                              </Box>
-                            </AccordionSummary>
-                            <AccordionDetails sx={{ p: 2, pt: 1 }}>
-                              <Grid container spacing={1}>
-                                {section.fields.map((fieldKey) => {
-                                  const rawValue = getPatientFieldValue(selectedPatient, fieldKey);
-                                  const hasValue = rawValue !== '';
-                                  const isSelected = selectedVariableKeys.has(fieldKey);
-                                  const isMissing = missingVariables.includes(fieldKey);
-                                  return (
-                                    <Grid key={fieldKey} item xs={12} sm={6}>
-                                      <Box
-                                        sx={{
-                                          p: 0.5,
-                                          borderRadius: 1,
-                                          bgcolor: isMissing ? 'rgba(212,67,61,0.06)' : isSelected ? 'rgba(57,151,118,0.06)' : 'transparent',
-                                          border: isMissing ? '1px solid rgba(212,67,61,0.3)' : isSelected ? '1px solid rgba(57,151,118,0.3)' : '1px solid transparent',
-                                        }}
-                                      >
-                                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
-                                          <Checkbox
-                                            checked={isSelected}
-                                            disabled={!hasValue}
-                                            onChange={() => handleToggleVariable(fieldKey)}
-                                            size="small"
-                                            color={isMissing ? 'error' : 'success'}
-                                            sx={{ pt: 0.5 }}
-                                          />
-                                          <Box>
-                                            <Typography variant="body2" color={!hasValue ? 'text.disabled' : 'text.primary'}>
-                                              {VARIABLE_LABELS[fieldKey] || formatVariableLabel(fieldKey)}
-                                            </Typography>
-                                            <Typography variant="caption" color={hasValue ? 'text.secondary' : 'text.disabled'}>
-                                              {hasValue ? rawValue : '— non renseigné'}
-                                            </Typography>
-                                          </Box>
-                                        </Box>
-                                      </Box>
-                                    </Grid>
-                                  );
-                                })}
-                              </Grid>
-                            </AccordionDetails>
-                          </Accordion>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Alert severity="info" sx={{ mt: 2 }}>
-                        Sélectionnez un patient dans l'onglet "Sélection patient" pour afficher sa fiche et choisir les variables.
-                      </Alert>
-                    )}
-                  </Paper>
-                </Grid>
-
-                {/* Panneau droit : variables sélectionnées + modèle + action */}
-                <Grid item xs={12} md={4}>
-                  <Stack spacing={2}>
-                    {/* Récapitulatif variables */}
-                    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                        Variables sélectionnées ({selectedVariableKeys.size})
-                      </Typography>
-                      {selectedVariableKeys.size ? (
-                        <Stack spacing={0.5} sx={{ maxHeight: 220, overflowY: 'auto' }}>
-                          {[...selectedVariableKeys].map((fieldKey) => (
-                            <Paper key={fieldKey} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
-                              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                                <Box sx={{ flex: 1, minWidth: 0 }}>
-                                  <Typography variant="caption" fontWeight={700} noWrap>
-                                    {VARIABLE_LABELS[fieldKey] || formatVariableLabel(fieldKey)}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                                    {selectedPatient ? getPatientFieldValue(selectedPatient, fieldKey) : '—'}
-                                  </Typography>
-                                </Box>
-                                <IconButton size="small" onClick={() => handleToggleVariable(fieldKey)} sx={{ ml: 0.5 }}>
-                                  <Typography variant="caption">✕</Typography>
-                                </IconButton>
-                              </Stack>
-                            </Paper>
-                          ))}
-                        </Stack>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">Aucune variable sélectionnée.</Typography>
-                      )}
-                    </Paper>
-
-                    {/* Choix du modèle */}
-                    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5 }}>
-                        Étape 3 — Choix du modèle
-                      </Typography>
-                      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-                        <Button
-                          variant={modelMode === 'auto' ? 'contained' : 'outlined'}
-                          color={modelMode === 'auto' ? 'success' : 'inherit'}
-                          onClick={() => setModelMode('auto')}
-                          size="small"
-                          sx={{ textTransform: 'none', flex: 1 }}
-                        >
-                          Automatique
-                        </Button>
-                        <Button
-                          variant={modelMode === 'manual' ? 'contained' : 'outlined'}
-                          color={modelMode === 'manual' ? 'success' : 'inherit'}
-                          onClick={() => setModelMode('manual')}
-                          size="small"
-                          sx={{ textTransform: 'none', flex: 1 }}
-                        >
-                          Manuel
-                        </Button>
-                      </Stack>
-
-                      {modelMode === 'manual' ? (
-                        <TextField
-                          select
-                          label="Modèle"
-                          value={selectedModel}
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                          fullWidth
-                          size="small"
-                        >
-                          {availableModelOptions.map((m) => (
-                            <MenuItem key={m.value} value={m.value}>
-                              {m.label}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                      ) : (
-                        <Box sx={{ p: 1.5, bgcolor: '#F6FAF6', borderRadius: 2, border: '1px solid rgba(57,151,118,0.3)' }}>
-                          <Typography variant="caption" color="success.main" fontWeight={700}>Recommandé pour {PREDICTION_TYPES.find((t) => t.value === selectedPredictionType)?.label}</Typography>
-                          <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 0.5 }}>
-                            {MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label || 'Random Forest'}
-                          </Typography>
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 1 }}>
-                            {recommendedModels.map((key) => (
-                              <Chip key={key} label={MODEL_OPTIONS.find((m) => m.value === key)?.label || key} color="success" variant="outlined" size="small" />
-                            ))}
-                          </Stack>
-                        </Box>
-                      )}
-                    </Paper>
-
-                    {/* Erreurs */}
-                    {predictionError && (
-                      <Alert severity="error" onClose={() => setPredictionError('')}>
-                        {predictionError}
-                      </Alert>
-                    )}
-
-                    {/* Bouton lancement */}
-                    <Button
-                      variant="contained"
-                      color="success"
-                      onClick={handleRunPrediction}
-                      disabled={predictionLoading || !validatePredictionInput()}
-                      fullWidth
-                      sx={{ py: 1.8, fontWeight: 700, textTransform: 'none', borderRadius: 3 }}
-                    >
-                      {predictionLoading ? (
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <CircularProgress size={18} color="inherit" />
-                          <span>Prédiction en cours...</span>
-                        </Stack>
-                      ) : 'Étape 4 — Lancer la prédiction'}
-                    </Button>
-
-                    {!selectedPatient && (
-                      <Alert severity="warning">Sélectionnez d'abord un patient (onglet "Sélection patient").</Alert>
-                    )}
-                    {selectedPatient && selectedVariableKeys.size === 0 && (
-                      <Alert severity="info">Cochez au moins une variable dans la fiche du patient.</Alert>
-                    )}
+                    <Chip
+                      label={roleName}
+                      sx={{
+                        alignSelf: { xs: 'flex-start', lg: 'flex-end' },
+                        fontWeight: 700,
+                        background: `linear-gradient(135deg, ${ROSE_ACCENT.mid}, #3d5a8a)`,
+                        color: '#fff',
+                      }}
+                    />
                   </Stack>
-                </Grid>
-              </Grid>
-            )}
+                </CardContent>
+              </Card>
 
-            {/* ── RÉSULTATS ── */}
-            {activeModule === 3 && (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={5}>
-                  <ModuleCard title="Score de risque" description="Score calculé par le modèle ML sur la base des variables sélectionnées.">
-                    {predictionScore !== null ? (
-                      <>
-                        <Typography variant="h2" fontWeight={900}>
-                          {typeof predictionScore === 'number' ? predictionScore.toFixed(1) : 0}%
-                        </Typography>
-                        <Typography variant="h6" fontWeight={700} sx={{ color: RISK_COLORS[riskLevel] || '#666', mt: 1 }}>
-                          {riskLevel || 'Inconnu'}
-                        </Typography>
-                        <Box sx={{ mt: 2, width: '100%', height: 14, borderRadius: 999, background: '#E6F4F1' }}>
-                          <Box
-                            sx={{
-                              width: `${Math.min(100, Math.max(0, predictionScore))}%`,
-                              height: '100%',
-                              borderRadius: 999,
-                              background: RISK_COLORS[riskLevel] || '#ccc',
-                              transition: 'width 0.5s ease',
-                            }}
-                          />
-                        </Box>
+              {/* Navigation */}
+              <Card elevation={0} sx={SURFACE_CARD_SX}>
+                <CardContent sx={{ p: 2.5 }}>
+                  <Tabs
+                    value={activeModule}
+                    onChange={(_, v) => setActiveModule(v)}
+                    variant="scrollable"
+                    allowScrollButtonsMobile
+                    sx={{
+                      minHeight: 42,
+                      '& .MuiTabs-indicator': {
+                        height: 3,
+                        borderRadius: 999,
+                        background: `linear-gradient(90deg, ${ROSE_ACCENT.mid}, #3d5a8a)`,
+                      },
+                      '& .MuiTab-root': {
+                        minHeight: 42,
+                        textTransform: 'none',
+                        fontWeight: 700,
+                        color: '#62708b',
+                        px: 1.5,
+                        borderRadius: 999,
+                        transition: 'all 0.2s ease',
+                      },
+                      '& .MuiTab-root.Mui-selected': {
+                        color: '#1e2d5a',
+                        background: 'linear-gradient(135deg, rgba(201,123,153,0.16), rgba(61,90,138,0.10))',
+                      },
+                    }}
+                  >
+                    {moduleTabs.map((label, index) => (
+                      <Tab key={label} value={index} label={label} />
+                    ))}
+                  </Tabs>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 2.25 }}>
+                    {moduleDescription[activeModule]}
+                  </Typography>
+                </CardContent>
+              </Card>
 
-                        {/* Légende des seuils */}
-                        <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="#399776">Faible (≤30%)</Typography>
-                          <Typography variant="caption" color="#E4A330">Modéré (31–70%)</Typography>
-                          <Typography variant="caption" color="#D4433D">Élevé (&gt;70%)</Typography>
-                        </Stack>
+              {/* ── TABLEAU DE BORD ── */}
+              {activeModule === 0 && (
+                <Grid container spacing={2}>
+                  {/* KPI Cards — Réduites */}
+                  <Grid item xs={12} sm={6} lg={2.4}>
+                    <KpiCard
+                      title={isEnglish ? 'Tracked patients' : 'Patients suivis'}
+                      description={isEnglish ? 'Base total' : 'Total base'}
+                      value={patients.length}
+                      valueColor="#1f6c8a"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} lg={2.4}>
+                    <KpiCard
+                      title={isEnglish ? 'High risk' : 'Haut risque'}
+                      description={isEnglish ? 'Alerts' : 'Alertes'}
+                      value={highRiskPatients.length}
+                      valueColor="#D4433D"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} lg={2.4}>
+                    <KpiCard
+                      title={isEnglish ? 'Recent' : 'Récents'}
+                      description={isEnglish ? 'Last 30 days' : '30 derniers jours'}
+                      value={recentPatientsCount}
+                      valueColor="#1f6c8a"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6} lg={2.4}>
+                    <KpiCard
+                      title={isEnglish ? 'Validated' : 'Validés'}
+                      description={isEnglish ? '% of total' : '% du total'}
+                      value={`${validationRate}%`}
+                      valueColor="#2B7A6B"
+                    />
+                  </Grid>
 
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                          Basé sur {Object.keys(predictionInput).length} variable(s) — modèle {MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label || selectedModel}.
-                        </Typography>
-
-                        {selectedDataRiskScore != null && (
-                          <Box sx={{ mt: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Score basé sur les variables sélectionnées :
-                            </Typography>
-                            <Box sx={{ mt: 0.75, width: '100%', height: 10, borderRadius: 999, bgcolor: '#E6F4F1' }}>
-                              <Box
-                                sx={{
-                                  width: `${Math.min(100, Math.max(0, selectedDataRiskScore))}%`,
-                                  height: '100%',
-                                  borderRadius: 999,
-                                  background:
-                                    selectedDataRiskScore >= 80
-                                      ? '#D4433D'
-                                      : selectedDataRiskScore >= 60
-                                        ? '#E4A330'
-                                        : selectedDataRiskScore >= 40
-                                          ? '#F3B42F'
-                                          : '#399776',
-                                }}
-                              />
-                            </Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                              {selectedDataRiskScore}% — Niveau : {selectedDataRiskCategory || 'N/A'}.
-                            </Typography>
-                          </Box>
-                        )}
-                        {doiRiskScore != null && (
-                          <Box sx={{ mt: 2 }}>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              Score clinique Doi :
-                            </Typography>
-                            <Box sx={{ mt: 0.75, width: '100%', height: 10, borderRadius: 999, bgcolor: '#F4F1F8' }}>
-                              <Box
-                                sx={{
-                                  width: `${Math.min(100, Math.max(0, doiRiskScore))}%`,
-                                  height: '100%',
-                                  borderRadius: 999,
-                                  background:
-                                    doiRiskScore >= 8
-                                      ? '#D4433D'
-                                      : doiRiskScore >= 6
-                                        ? '#E4A330'
-                                        : doiRiskScore >= 4
-                                          ? '#F3B42F'
-                                          : '#399776',
-                                }}
-                              />
-                            </Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                              {doiRiskScore} — Niveau : {doiRiskCategory || 'N/A'}.
-                            </Typography>
-                          </Box>
-                        )}
-
-                        {(() => {
-                          const metrics = trainingResult?.best_metrics || trainingResult?.report?.find((item) => item?.auc != null || item?.f1 != null);
-                          return metrics ? (
-                            <Box sx={{ mt: 3, p: 2, borderRadius: 2, bgcolor: '#F7FAFF' }}>
-                              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                                Métriques du modèle entraîné
-                              </Typography>
-                              <Stack spacing={0.5}>
-                                {metrics.accuracy != null && (
-                                  <Typography variant="body2">Accuracy : {(metrics.accuracy * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.precision != null && (
-                                  <Typography variant="body2">Precision : {(metrics.precision * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.recall != null && (
-                                  <Typography variant="body2">Recall : {(metrics.recall * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.f1 != null && (
-                                  <Typography variant="body2">F1 : {(metrics.f1 * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.auc != null && (
-                                  <Typography variant="body2">AUC : {(metrics.auc * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.pr_auc != null && (
-                                  <Typography variant="body2">PR AUC : {(metrics.pr_auc * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.cv_auc_mean != null && metrics.cv_auc_std != null && (
-                                  <Typography variant="body2">CV AUC : {(metrics.cv_auc_mean * 100).toFixed(1)}% ± {(metrics.cv_auc_std * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.threshold != null && (
-                                  <Typography variant="body2">Seuil optimisé : {(metrics.threshold * 100).toFixed(1)}%</Typography>
-                                )}
-                                {metrics.class_distribution && (
-                                  <Typography variant="body2">
-                                    Distribution classes : 0 = {metrics.class_distribution[0] ?? 0}, 1 = {metrics.class_distribution[1] ?? 0}
-                                  </Typography>
-                                )}
-                              </Stack>
-                            </Box>
-                          ) : null;
-                        })()}
-                      </>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        Aucune prédiction disponible. Lancez une prédiction depuis l'onglet précédent.
-                      </Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-
-                <Grid item xs={12} md={7}>
-                  <ModuleCard title="Interprétabilité" description="Facteurs déterminants avec leur poids relatif dans la décision du modèle.">
-                    {predictionFactors.length > 0 ? (
-                      <Stack spacing={1.5}>
-                        {predictionFactors.map((item, idx) => (
-                          <Box key={`${item.label}-${idx}`}>
-                            <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                              <Typography variant="body2">{VARIABLE_LABELS[item.label] || item.label}</Typography>
-                              <Typography variant="body2" fontWeight={700}>{item.weight}%</Typography>
-                            </Stack>
-                            <LinearProgress
-                              variant="determinate"
-                              value={Math.min(100, item.weight)}
-                              sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(0,0,0,0.06)' }}
-                              color="success"
-                            />
-                          </Box>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        Aucun facteur d'interprétabilité disponible. Le modèle utilisé ne supporte pas l'extraction d'importances.
-                      </Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <ModuleCard title="Variables utilisées" description="Variables envoyées au modèle ML pour cette prédiction.">
-                    {Object.keys(predictionInput).length > 0 ? (
-                      <Stack spacing={0.5} sx={{ maxHeight: 300, overflowY: 'auto' }}>
-                        {Object.entries(predictionInput).map(([key, value]) => (
-                          <Box
-                            key={key}
-                            sx={{ display: 'flex', justifyContent: 'space-between', p: 1, borderRadius: 2, bgcolor: '#F7FAFF' }}
-                          >
-                            <Typography variant="body2">{VARIABLE_LABELS[key] || formatVariableLabel(key)}</Typography>
-                            <Typography variant="body2" fontWeight={700}>{String(value)}</Typography>
-                          </Box>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">Aucune variable utilisée.</Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <ModuleCard title="Recommandation clinique" description="Proposition concrète de suivi et de prise en charge.">
-                    {recommendation ? (
-                      <Alert severity={riskLevel === 'Élevé' ? 'error' : riskLevel === 'Modéré' ? 'warning' : 'success'} sx={{ borderRadius: 2 }}>
-                        {recommendation}
-                      </Alert>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">Aucune recommandation disponible.</Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* ── HISTORIQUE ── */}
-            {activeModule === 4 && (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={4}>
-                  <ModuleCard title="Filtre historique" description="Filtrez par période.">
-                    <TextField
-                      select
-                      label="Période"
-                      value={selectedDateFilter}
-                      onChange={(e) => setSelectedDateFilter(e.target.value)}
-                      fullWidth
-                      size="small"
-                    >
-                      <MenuItem value="7jours">7 jours</MenuItem>
-                      <MenuItem value="30jours">30 jours</MenuItem>
-                      <MenuItem value="90jours">90 jours</MenuItem>
-                    </TextField>
-                  </ModuleCard>
-                </Grid>
-                <Grid item xs={12} md={8}>
-                  <ModuleCard title="Historique des prédictions" description="Toutes les prédictions sont tracées pour l'audit médical.">
-                    {loadingHistory ? (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-                        <CircularProgress size={28} />
-                      </Box>
-                    ) : predictionHistory.length > 0 ? (
-                      <Stack spacing={1.5}>
-                        {predictionHistory.map((item) => (
-                          <Paper key={item.id} variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                            <Typography variant="body2">
-                              {item.created_at ? new Date(item.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Date inconnue'}
-                              {' — '}Patient {item.patient_id}
-                              {' — '}{item.prediction_type}
-                              {' — '}
-                              <strong style={{ color: RISK_COLORS[item.risk_level] || '#666' }}>{item.risk_level}</strong>
-                              {' '}({item.score}%)
-                            </Typography>
-                          </Paper>
-                        ))}
-                      </Stack>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        Aucune prédiction enregistrée pour cette période. Les prédictions apparaissent ici après avoir été effectuées.
-                      </Typography>
-                    )}
-                  </ModuleCard>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* ── GESTION MODÈLES ── */}
-            {activeModule === 5 && (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={7}>
-                  <ModuleCard title="Gérer les modèles ML" description="Consultez les versions, métriques et lancez un entraînement.">
-                    <Stack spacing={2}>
-                      {/* Sélection type prédiction pour métriques */}
-                      <TextField
-                        select
-                        label="Type de prédiction"
-                        value={selectedPredictionType}
-                        onChange={(e) => setSelectedPredictionType(e.target.value)}
-                        size="small"
-                        sx={{ maxWidth: 260 }}
-                      >
-                        {PREDICTION_TYPES.map((t) => (
-                          <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
-                        ))}
-                      </TextField>
-
-                      {MODEL_OPTIONS.map((model) => {
-                        const info = mergedModelMetrics[model.value];
-                        const reportInfo = trainingResult?.report?.find((item) => item.model === model.value);
-                        const displayMetrics = info?.metrics || reportInfo?.metrics || reportInfo || {};
-                        const featureCount = info?.feature_count ?? reportInfo?.feature_keys?.length;
-                        const isTrained = info?.trained || Boolean(reportInfo);
-                        return (
-                          <Paper key={model.value} variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                              <Box sx={{ flex: 1 }}>
-                                <Typography variant="subtitle2" fontWeight={700}>{model.label}</Typography>
-                                <Typography variant="caption" color="text.secondary">{model.description}</Typography>
-                                {isTrained && (
-                                  <>
-                                    {featureCount != null && (
-                                      <Typography variant="caption" color="success.main" display="block">
-                                        Entraîné sur {featureCount} variable(s)
-                                      </Typography>
-                                    )}
-                                    <Typography variant="caption" color="text.secondary" display="block">
-                                      {displayMetrics.auc != null ? `AUC ${(displayMetrics.auc * 100).toFixed(1)}%` : 'AUC —'}
-                                      {displayMetrics.f1 != null ? ` · F1 ${(displayMetrics.f1 * 100).toFixed(1)}%` : ''}
-                                      {displayMetrics.accuracy != null ? ` · Acc ${(displayMetrics.accuracy * 100).toFixed(1)}%` : ''}
-                                    </Typography>
-                                  </>
-                                )}
-                              </Box>
-                              <Chip
-                                label={isTrained ? 'Entraîné' : 'Non entraîné'}
-                                color={isTrained ? (model.value === selectedModel ? 'success' : 'primary') : 'default'}
-                                size="small"
-                              />
-                            </Stack>
-                          </Paper>
-                        );
-                      })}
-
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                          Détails des métriques des modèles
-                        </Typography>
-                        {(Object.keys(modelMetrics).length === 0 && !(trainingResult?.report?.length > 0)) ? (
-                          <Typography variant="body2" color="text.secondary">
-                            Aucune métrique disponible. Lancez l'entraînement pour générer les scores.
-                          </Typography>
-                        ) : (
-                          <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, maxHeight: 260 }}>
-                            <Table size="small" stickyHeader>
-                              <TableHead sx={{ backgroundColor: 'rgba(226,237,244,0.9)' }}>
-                                <TableRow>
-                                  <TableCell sx={{ fontWeight: 700 }}>Modèle</TableCell>
-                                  <TableCell sx={{ fontWeight: 700 }}>AUC</TableCell>
-                                  <TableCell sx={{ fontWeight: 700 }}>F1</TableCell>
-                                  <TableCell sx={{ fontWeight: 700 }}>Acc</TableCell>
-                                  <TableCell sx={{ fontWeight: 700 }}>Préc.</TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {(Object.keys(modelMetrics).length > 0 || (trainingResult?.report?.length > 0)) ? (
-                                  MODEL_OPTIONS.map((model) => {
-                                    const info = mergedModelMetrics[model.value];
-                                    const reportInfo = trainingResult?.report?.find((item) => item.model === model.value);
-                                    const displayMetrics = info?.metrics || reportInfo?.metrics || reportInfo || {};
-                                    return (
-                                      <TableRow key={model.value}>
-                                        <TableCell>{model.label}</TableCell>
-                                        <TableCell>{displayMetrics?.auc != null ? `${(displayMetrics.auc * 100).toFixed(1)}%` : '—'}</TableCell>
-                                        <TableCell>{displayMetrics?.f1 != null ? `${(displayMetrics.f1 * 100).toFixed(1)}%` : '—'}</TableCell>
-                                        <TableCell>{displayMetrics?.accuracy != null ? `${(displayMetrics.accuracy * 100).toFixed(1)}%` : '—'}</TableCell>
-                                        <TableCell>{displayMetrics?.precision != null ? `${(displayMetrics.precision * 100).toFixed(1)}%` : '—'}</TableCell>
-                                      </TableRow>
-                                    );
-                                  })
-                                ) : null}
-                              </TableBody>
-                            </Table>
-                          </TableContainer>
-                        )}
-                      </Box>
-
-                      <Divider />
-
-                      {/* Entraînement */}
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                          Lancer l'entraînement
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          Entraîne tous les modèles sur les données patients en base.
-                          {selectedVariableKeys.size > 0 && ` Les ${selectedVariableKeys.size} variable(s) actuellement sélectionnées seront utilisées.`}
-                        </Typography>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          onClick={handleTrainModel}
-                          disabled={trainingLoading}
-                          sx={{ textTransform: 'none' }}
-                        >
-                          {trainingLoading ? (
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <CircularProgress size={16} color="inherit" />
-                              <span>Entraînement en cours...</span>
-                            </Stack>
-                          ) : `Entraîner — ${PREDICTION_TYPES.find((t) => t.value === selectedPredictionType)?.label}`}
-                        </Button>
-                      </Box>
-
-                      {trainingError && <Alert severity="error">{trainingError}</Alert>}
-
-                      {trainingResult && (
-                        <>
-                          <Alert severity="success">
-                            Entraînement terminé. Meilleur modèle : <strong>{
-                              trainingResult.best_model
-                                ? typeof trainingResult.best_model === 'object'
-                                  ? trainingResult.best_model.model || trainingResult.best_model.name || JSON.stringify(trainingResult.best_model)
-                                  : trainingResult.best_model
-                                : 'non défini'
-                            }</strong>.
-                            {trainingResult.best_metrics && (
-                              <> AUC : {(trainingResult.best_metrics.auc * 100).toFixed(1)}% · F1 : {(trainingResult.best_metrics.f1 * 100).toFixed(1)}%.</>
-                            )}
-                          </Alert>
-                          {Array.isArray(trainingResult.report) && trainingResult.report.length > 0 && (
-                            <Paper variant="outlined" sx={{ mt: 2, p: 2, borderRadius: 3, bgcolor: '#F7FAFF' }}>
-                              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                                Rapport des modèles entraînés
-                              </Typography>
-                              <Stack spacing={1}>
-                                {trainingResult.report.map((item) => {
-                                  const displayMetrics = item.metrics || item;
-                                  return (
-                                    <Box key={item.model} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                                      <Typography variant="body2" sx={{ fontWeight: 700 }}>{item.model}</Typography>
-                                      <Typography variant="body2" color="text.secondary">
-                                        {displayMetrics.auc != null ? `AUC ${(displayMetrics.auc * 100).toFixed(1)}%` : 'AUC N/A'}
-                                        {displayMetrics.f1 != null ? ` · F1 ${(displayMetrics.f1 * 100).toFixed(1)}%` : ''}
-                                        {displayMetrics.precision != null ? ` · Préc ${(displayMetrics.precision * 100).toFixed(1)}%` : ''}
-                                      </Typography>
-                                      {item.error && (
-                                        <Typography variant="caption" color="error.main" sx={{ width: '100%' }}>
-                                          Erreur : {item.error}
-                                        </Typography>
-                                      )}
-                                    </Box>
-                                  );
-                                })}
-                              </Stack>
-                            </Paper>
-                          )}
-                        </>
-                      )}
-                    </Stack>
-                  </ModuleCard>
-                </Grid>
-
-                <Grid item xs={12} md={5}>
-                  <ModuleCard title="Sécurité et audit" description="SSO, chiffrement, conformité RGPD et traçabilité de chaque action.">
-                    <Stack spacing={1}>
-                      {['SSO sécurisé', 'Chiffrement des données', 'Traçabilité complète', 'Conformité RGPD'].map((item) => (
-                        <Typography key={item} variant="body2" color="text.secondary">• {item}</Typography>
-                      ))}
-                    </Stack>
-                  </ModuleCard>
-
-                  <Box sx={{ mt: 2 }}>
-                    <ModuleCard title="Processus ML" description="Étapes du pipeline de Machine Learning.">
+                  {/* Espace à droite - Panel latéral */}
+                  <Grid item xs={12} lg={2}>
+                    <Card elevation={0} sx={{...SURFACE_CARD_SX, minHeight: 130, p: 2}}>
                       <Stack spacing={1}>
-                        {[
-                          '1. Sélection du patient',
-                          '2. Choix des variables cliniques',
-                          '3. Sélection du modèle',
-                          '4. Prédiction via le backend ML',
-                          '5. Interprétabilité des résultats',
-                          '6. Recommandation clinique',
-                          '7. Sauvegarde dans l\'historique',
-                        ].map((step) => (
-                          <Typography key={step} variant="body2" color="text.secondary">{step}</Typography>
-                        ))}
+                        <Typography variant="overline" fontWeight={700} sx={{ color: '#62708b', letterSpacing: '0.05em', fontSize: '0.7rem' }}>
+                          {isEnglish ? 'Status' : 'Statut'}
+                        </Typography>
+                        <Chip label={isEnglish ? 'Active' : 'Actif'} color="success" size="small" />
+                        <Typography variant="caption" color="text.secondary">{isEnglish ? 'System online' : 'Système en ligne'}</Typography>
+                      </Stack>
+                    </Card>
+                  </Grid>
+
+                  {/* Alertes haut risque */}
+                  <Grid item xs={12}>
+                    <ModuleCard title={isEnglish ? 'High risk alerts' : 'Alertes haut risque'} description={isEnglish ? 'Open a record in one click.' : 'Lancer un dossier en un clic.'}>
+                      <Stack spacing={2}>
+                        {highRiskPatients.length ? (
+                          highRiskPatients.slice(0, 3).map((patient) => {
+                            const reason = [];
+                            if (['oui', 'true', '1'].includes(String(patient.infection || '').toLowerCase())) reason.push(isEnglish ? 'Infection' : 'Infection');
+                            if (['oui', 'true', '1'].includes(String(patient.hemorrhage || '').toLowerCase())) reason.push(isEnglish ? 'Hemorrhage' : 'Hémorragie');
+                            if (['oui', 'true', '1'].includes(String(patient.avf_created || '').toLowerCase())) reason.push('AVF');
+                            if (!reason.length) reason.push(isEnglish ? 'Critical status' : 'Statut critique');
+                            return (
+                              <Button key={patient.id} variant="outlined" fullWidth onClick={() => handleSelectPatient(patient)}>
+                                {patient.nom || 'Patient'} {patient.prenom || ''} — {reason.join(' / ')}
+                              </Button>
+                            );
+                          })
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">{isEnglish ? 'No high-risk alert detected.' : 'Aucune alerte haut risque détectée.'}</Typography>
+                        )}
                       </Stack>
                     </ModuleCard>
-                  </Box>
+                  </Grid>
                 </Grid>
-              </Grid>
-            )}
-          </Stack>
-        </Grid>
-      </Grid>
+              )}
+
+              {/* ── SÉLECTION PATIENT ── */}
+              {activeModule === 1 && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={4}>
+                    <ModuleCard title={isEnglish ? 'Patient search' : 'Recherche du patient'} description={isEnglish ? 'Search by last name, first name, or ID.' : 'Recherchez par nom, prénom ou identifiant.'}>
+                      <Stack spacing={2}>
+                        <TextField label={isEnglish ? 'Last name or first name' : 'Nom ou prénom'} value={patientCriteria.search} onChange={(e) => handleSearchChange('search', e.target.value)} fullWidth size="small" />
+                        <TextField label={isEnglish ? 'Patient ID' : 'ID patient'} value={patientCriteria.id} onChange={(e) => handleSearchChange('id', e.target.value)} fullWidth size="small" />
+                        <TextField select label={isEnglish ? 'Sex' : 'Sexe'} value={patientCriteria.sexe} onChange={(e) => handleSearchChange('sexe', e.target.value)} fullWidth size="small">
+                          <MenuItem value="">{isEnglish ? 'All' : 'Tous'}</MenuItem>
+                          <MenuItem value="M">{isEnglish ? 'Male' : 'Homme'}</MenuItem>
+                          <MenuItem value="F">{isEnglish ? 'Female' : 'Femme'}</MenuItem>
+                          <MenuItem value="O">{isEnglish ? 'Other' : 'Autre'}</MenuItem>
+                        </TextField>
+                      </Stack>
+                    </ModuleCard>
+                  </Grid>
+                  <Grid item xs={12} md={8}>
+                    <ModuleCard title={isEnglish ? 'Search results' : 'Résultats de recherche'} description={isEnglish ? 'Click a patient to open their profile.' : 'Cliquez sur un patient pour accéder à sa fiche.'}>
+                      {loadingPatients ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                          <CircularProgress size={32} />
+                        </Box>
+                      ) : displayPatients.length ? (
+                        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3 }}>
+                          <Table size="small">
+                            <TableHead sx={{ backgroundColor: 'rgba(226,237,244,0.9)' }}>
+                              <TableRow>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Patient ID' : 'ID patient'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Last name' : 'Nom'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'First name' : 'Prénom'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Sex' : 'Sexe'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Site' : 'Site'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Age' : 'Âge'}</TableCell>
+                                <TableCell sx={{ fontWeight: 700 }}>{isEnglish ? 'Status' : 'Statut'}</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {displayPatients.map((patient) => (
+                                <TableRow
+                                  key={patient.id}
+                                  hover
+                                  sx={{ cursor: 'pointer', bgcolor: String(patient.id) === String(selectedPatientId) ? 'rgba(57,151,118,0.08)' : 'inherit' }}
+                                  onClick={() => handleSelectPatient(patient)}
+                                >
+                                  <TableCell>{patient.id_patient || '-'}</TableCell>
+                                  <TableCell>{patient.nom || '-'}</TableCell>
+                                  <TableCell>{patient.prenom || '-'}</TableCell>
+                                  <TableCell>{patient.sexe || patient.sex || '-'}</TableCell>
+                                  <TableCell>{patient.id_site || '-'}</TableCell>
+                                  <TableCell>{patient.age || patient.demographie_age_ans || '-'}</TableCell>
+                                  <TableCell>{patient.statut_inclusion || '-'}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">{isEnglish ? 'No patient found.' : 'Aucun patient trouvé.'}</Typography>
+                      )}
+                    </ModuleCard>
+                  </Grid>
+                </Grid>
+              )}
+
+              {/* ── LANCER PRÉDICTION ── */}
+              {activeModule === 2 && (
+                <Grid container spacing={3}>
+                  {/* Type de prédiction */}
+                  <Grid item xs={12}>
+                    <Paper variant="outlined" sx={{ ...PANEL_SX, p: 3 }}>
+                      <Typography variant="h6" fontWeight={700}>{isEnglish ? 'Step 1 - Prediction type' : 'Étape 1 — Type de prédiction'}</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2 }}>
+                        {isEnglish ? 'Choose the prediction type to run.' : 'Choisissez le type de prédiction à effectuer.'}
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {PREDICTION_TYPES.map((type) => (
+                          <Tooltip key={type.value} title={type.detail} arrow>
+                            <Button
+                              variant={selectedPredictionType === type.value ? 'contained' : 'outlined'}
+                              color={selectedPredictionType === type.value ? 'success' : 'inherit'}
+                              onClick={() => setSelectedPredictionType(type.value)}
+                              sx={{ textTransform: 'none' }}
+                            >
+                              {type.label}
+                            </Button>
+                          </Tooltip>
+                        ))}
+                      </Box>
+                    </Paper>
+                  </Grid>
+
+                  {/* Fiche patient + sélection variables */}
+                  <Grid item xs={12} md={8}>
+                    <Paper variant="outlined" sx={{ ...PANEL_SX, p: 3, minHeight: 680 }}>
+                      <Typography variant="subtitle1" fontWeight={700}>{isEnglish ? 'Step 2 - Variable selection' : 'Étape 2 — Sélection des variables'}</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        {isEnglish ? 'Check the patient variables you want to use for prediction. Only variables with a value are enabled.' : 'Cochez les variables disponibles du patient à utiliser pour la prédiction. Seules les variables avec une valeur sont activées.'}
+                      </Typography>
+
+                      {selectedPatient ? (
+                        <Stack spacing={2}>
+                          {/* Identité patient */}
+                          <Paper variant="outlined" sx={{ ...PANEL_SX, p: 2, bgcolor: 'rgba(255,255,255,.9)' }}>
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Avatar sx={{ bgcolor: '#E1F5EE', color: '#0F6E56', fontWeight: 700, width: 48, height: 48 }}>
+                                {selectedPatient.nom?.[0] || 'P'}
+                              </Avatar>
+                              <Box>
+                                <Typography variant="subtitle1" fontWeight={700}>
+                                  {selectedPatient.nom || ''} {selectedPatient.prenom || ''}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  ID : {selectedPatient.id_patient || selectedPatient.id || '-'} · Site : {selectedPatient.id_site || '-'}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1.5 }}>
+                              {selectedPatient.dialyse_modalite_actuelle && (
+                                <Chip label={selectedPatient.dialyse_modalite_actuelle} size="small" sx={{ bgcolor: '#E1F5EE', color: '#0F6E56' }} />
+                              )}
+                              {selectedPatient.statut_inclusion && (
+                                <Chip label={selectedPatient.statut_inclusion} size="small" sx={{ bgcolor: '#E6F1FB', color: '#185FA5' }} />
+                              )}
+                            </Stack>
+                          </Paper>
+
+                          <TextField
+                            label={isEnglish ? 'Search a variable' : 'Rechercher une variable'}
+                            size="small"
+                            value={variableSearch}
+                            onChange={(e) => setVariableSearch(e.target.value)}
+                            fullWidth
+                            sx={{ mb: 2 }}
+                          />
+
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={handleSelectAllVariables}
+                              disabled={!selectedPatient || filteredVariableGroups.every((section) => section.fields.length === 0)}
+                            >
+                              {isEnglish ? 'Select all' : 'Tout sélectionner'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={handleDeselectAllVariables}
+                              disabled={selectedVariableKeys.size === 0}
+                            >
+                              {isEnglish ? 'Deselect all' : 'Tout désélectionner'}
+                            </Button>
+                          </Stack>
+
+                          {filteredVariableGroups.map((section) => (
+                            <Accordion key={section.title} disableGutters sx={{ ...PANEL_SX, boxShadow: 'none' }}>
+                              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 2, py: 1 }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                  <Typography variant="subtitle2" fontWeight={700}>{section.title}</Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {section.fields.filter((k) => selectedVariableKeys.has(k)).length} sélectionné(s) / {section.fields.length}
+                                  </Typography>
+                                </Box>
+                              </AccordionSummary>
+                              <AccordionDetails sx={{ p: 2, pt: 1 }}>
+                                <Grid container spacing={1}>
+                                  {section.fields.map((fieldKey) => {
+                                    const rawValue = getPatientFieldValue(selectedPatient, fieldKey);
+                                    const hasValue = rawValue !== '';
+                                    const isSelected = selectedVariableKeys.has(fieldKey);
+                                    const isMissing = missingVariables.includes(fieldKey);
+                                    return (
+                                      <Grid key={fieldKey} item xs={12} sm={6}>
+                                        <Box
+                                          sx={{
+                                            p: 0.5,
+                                            borderRadius: 1,
+                                            bgcolor: isMissing ? 'rgba(212,67,61,0.06)' : isSelected ? 'rgba(57,151,118,0.06)' : 'transparent',
+                                            border: isMissing ? '1px solid rgba(212,67,61,0.3)' : isSelected ? '1px solid rgba(57,151,118,0.3)' : '1px solid transparent',
+                                          }}
+                                        >
+                                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                                            <Checkbox
+                                              checked={isSelected}
+                                              disabled={!hasValue}
+                                              onChange={() => handleToggleVariable(fieldKey)}
+                                              size="small"
+                                              color={isMissing ? 'error' : 'success'}
+                                              sx={{ pt: 0.5 }}
+                                            />
+                                            <Box>
+                                              <Typography variant="body2" color={!hasValue ? 'text.disabled' : 'text.primary'}>
+                                                {VARIABLE_LABELS[fieldKey] || formatVariableLabel(fieldKey)}
+                                              </Typography>
+                                              <Typography variant="caption" color={hasValue ? 'text.secondary' : 'text.disabled'}>
+                                                {hasValue ? rawValue : '— non renseigné'}
+                                              </Typography>
+                                            </Box>
+                                          </Box>
+                                        </Box>
+                                      </Grid>
+                                    );
+                                  })}
+                                </Grid>
+                              </AccordionDetails>
+                            </Accordion>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Alert severity="info" sx={{ mt: 2 }}>
+                          {isEnglish ? 'Select a patient in the "Patient selection" tab to display their profile and choose variables.' : 'Sélectionnez un patient dans l\'onglet "Sélection patient" pour afficher sa fiche et choisir les variables.'}
+                        </Alert>
+                      )}
+                    </Paper>
+                  </Grid>
+
+                  {/* Panneau droit : variables sélectionnées + modèle + action */}
+                  <Grid item xs={12} md={4}>
+                    <Stack spacing={2}>
+                      {/* Récapitulatif variables */}
+                      <Paper variant="outlined" sx={{ ...PANEL_SX, p: 2.5 }}>
+                        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                          {isEnglish ? `Selected variables (${selectedVariableKeys.size})` : `Variables sélectionnées (${selectedVariableKeys.size})`}
+                        </Typography>
+                        {selectedVariableKeys.size ? (
+                          <Stack spacing={0.5} sx={{ maxHeight: 220, overflowY: 'auto' }}>
+                            {[...selectedVariableKeys].map((fieldKey) => (
+                              <Paper key={fieldKey} variant="outlined" sx={{ ...PANEL_SX, p: 1 }}>
+                                <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Typography variant="caption" fontWeight={700} noWrap>
+                                      {VARIABLE_LABELS[fieldKey] || formatVariableLabel(fieldKey)}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                                      {selectedPatient ? getPatientFieldValue(selectedPatient, fieldKey) : '—'}
+                                    </Typography>
+                                  </Box>
+                                  <IconButton size="small" onClick={() => handleToggleVariable(fieldKey)} sx={{ ml: 0.5 }}>
+                                    <Typography variant="caption">✕</Typography>
+                                  </IconButton>
+                                </Stack>
+                              </Paper>
+                            ))}
+                          </Stack>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">{isEnglish ? 'No variable selected.' : 'Aucune variable sélectionnée.'}</Typography>
+                        )}
+                      </Paper>
+
+                      {/* Choix du modèle */}
+                      <Paper variant="outlined" sx={{ ...PANEL_SX, p: 2.5 }}>
+                        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5 }}>
+                          {isEnglish ? 'Step 3 - Model choice' : 'Étape 3 — Choix du modèle'}
+                        </Typography>
+                        <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                          <Button
+                            variant={modelMode === 'auto' ? 'contained' : 'outlined'}
+                            color={modelMode === 'auto' ? 'success' : 'inherit'}
+                            onClick={() => setModelMode('auto')}
+                            size="small"
+                            sx={{ textTransform: 'none', flex: 1 }}
+                          >
+                            {isEnglish ? 'Automatic' : 'Automatique'}
+                          </Button>
+                          <Button
+                            variant={modelMode === 'manual' ? 'contained' : 'outlined'}
+                            color={modelMode === 'manual' ? 'success' : 'inherit'}
+                            onClick={() => setModelMode('manual')}
+                            size="small"
+                            sx={{ textTransform: 'none', flex: 1 }}
+                          >
+                            {isEnglish ? 'Manual' : 'Manuel'}
+                          </Button>
+                        </Stack>
+
+                        {modelMode === 'manual' ? (
+                          <TextField
+                            select
+                            label={isEnglish ? 'Model' : 'Modèle'}
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value)}
+                            fullWidth
+                            size="small"
+                          >
+                            {availableModelOptions.map((m) => (
+                              <MenuItem key={m.value} value={m.value}>
+                                {m.label}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        ) : (
+                          <Box sx={{ p: 1.5, bgcolor: 'rgba(57,151,118,0.07)', borderRadius: 2, border: '1px solid rgba(57,151,118,0.26)' }}>
+                            <Typography variant="caption" color="success.main" fontWeight={700}>{isEnglish ? 'Recommended' : 'Recommandé'}</Typography>
+                            <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 0.5 }}>
+                              {MODEL_OPTIONS.find((m) => m.value === selectedModel)?.label || 'Random Forest'}
+                            </Typography>
+                          </Box>
+                        )}
+                      </Paper>
+
+                      {/* Erreurs */}
+                      {predictionError && (
+                        <Alert severity="error" onClose={() => setPredictionError('')}>
+                          {predictionError}
+                        </Alert>
+                      )}
+
+                      {/* Bouton lancement */}
+                      <Button
+                        variant="contained"
+                        color="success"
+                        onClick={handleRunPrediction}
+                        disabled={predictionLoading || !validatePredictionInput()}
+                        fullWidth
+                        sx={{ py: 1.8, fontWeight: 700, textTransform: 'none', borderRadius: 3 }}
+                      >
+                        {predictionLoading ? (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <CircularProgress size={18} color="inherit" />
+                            <span>{isEnglish ? 'Running...' : 'En cours...'}</span>
+                          </Stack>
+                        ) : (isEnglish ? 'Run' : 'Lancer')}
+                      </Button>
+
+                      {!selectedPatient && (
+                        <Alert severity="warning">{isEnglish ? 'Select a patient first.' : "Sélectionnez un patient d'abord."}</Alert>
+                      )}
+                      {selectedPatient && selectedVariableKeys.size === 0 && (
+                        <Alert severity="info">{isEnglish ? 'Select at least one variable.' : 'Cochez au moins une variable.'}</Alert>
+                      )}
+                    </Stack>
+                  </Grid>
+                </Grid>
+              )}
+
+              {/* ── RÉSULTATS ── */}
+              {activeModule === 3 && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={5}>
+                    <ModuleCard title={isEnglish ? 'Risk score' : 'Score de risque'} description={isEnglish ? 'Score computed by the ML model.' : 'Score calculé par le modèle ML.'}>
+                      {predictionScore !== null ? (
+                        <>
+                          <Typography variant="h2" fontWeight={900}>
+                            {typeof predictionScore === 'number' ? predictionScore.toFixed(1) : 0}%
+                          </Typography>
+                          <Typography variant="h6" fontWeight={700} sx={{ color: RISK_COLORS[riskLevel] || '#666', mt: 1 }}>
+                            {riskLevel || (isEnglish ? 'Unknown' : 'Inconnu')}
+                          </Typography>
+                          <Box sx={{ mt: 2, width: '100%', height: 14, borderRadius: 999, background: '#E6F4F1' }}>
+                            <Box
+                              sx={{
+                                width: `${Math.min(100, Math.max(0, predictionScore))}%`,
+                                height: '100%',
+                                borderRadius: 999,
+                                background: RISK_COLORS[riskLevel] || '#ccc',
+                                transition: 'width 0.5s ease',
+                              }}
+                            />
+                          </Box>
+
+                          <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
+                            <Typography variant="caption" color="#399776">{isEnglish ? 'Low (≤30%)' : 'Faible (≤30%)'}</Typography>
+                            <Typography variant="caption" color="#E4A330">{isEnglish ? 'Moderate (31–70%)' : 'Modéré (31–70%)'}</Typography>
+                            <Typography variant="caption" color="#D4433D">{isEnglish ? 'High (&gt;70%)' : 'Élevé (&gt;70%)'}</Typography>
+                          </Stack>
+
+                          {doiRiskScore != null && (
+                            <Box sx={{ mt: 2 }}>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                {isEnglish ? 'DOI score' : 'Score Doi'} : {doiRiskScore}
+                              </Typography>
+                            </Box>
+                          )}
+                        </>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          {isEnglish ? 'No prediction available.' : 'Aucune prédiction disponible.'}
+                        </Typography>
+                      )}
+                    </ModuleCard>
+                  </Grid>
+
+                  <Grid item xs={12} md={7}>
+                    <ModuleCard title={isEnglish ? 'Interpretability' : 'Interprétabilité'} description={isEnglish ? 'Key factors in the decision.' : 'Facteurs déterminants dans la décision.'}>
+                      {predictionFactors.length > 0 ? (
+                        <Stack spacing={1.5}>
+                          {predictionFactors.map((item, idx) => (
+                            <Box key={`${item.label}-${idx}`}>
+                              <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                                <Typography variant="body2">{VARIABLE_LABELS[item.label] || item.label}</Typography>
+                                <Typography variant="body2" fontWeight={700}>{item.weight}%</Typography>
+                              </Stack>
+                              <LinearProgress
+                                variant="determinate"
+                                value={Math.min(100, item.weight)}
+                                sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(0,0,0,0.06)' }}
+                                color="success"
+                              />
+                            </Box>
+                          ))}
+                        </Stack>
+                      ) : (
+                          <Typography variant="body2" color="text.secondary">
+                          {isEnglish ? 'No factor available.' : 'Aucun facteur disponible.'}
+                        </Typography>
+                      )}
+                    </ModuleCard>
+                  </Grid>
+
+                  <Grid item xs={12} md={6}>
+                    <ModuleCard title={isEnglish ? 'Used variables' : 'Variables utilisées'} description={isEnglish ? 'Variables sent to the model.' : 'Variables envoyées au modèle.'}>
+                      {Object.keys(predictionInput).length > 0 ? (
+                        <Stack spacing={0.5} sx={{ maxHeight: 300, overflowY: 'auto' }}>
+                          {Object.entries(predictionInput).map(([key, value]) => (
+                            <Box
+                              key={key}
+                              sx={{ display: 'flex', justifyContent: 'space-between', p: 1, borderRadius: 2, bgcolor: '#F7FAFF' }}
+                            >
+                              <Typography variant="body2">{VARIABLE_LABELS[key] || formatVariableLabel(key)}</Typography>
+                              <Typography variant="body2" fontWeight={700}>{String(value)}</Typography>
+                            </Box>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">{isEnglish ? 'No variable.' : 'Aucune variable.'}</Typography>
+                      )}
+                    </ModuleCard>
+                  </Grid>
+
+                  <Grid item xs={12} md={6}>
+                    <ModuleCard title={isEnglish ? 'Recommendation' : 'Recommandation'} description={isEnglish ? 'Follow-up suggestion.' : 'Proposition de suivi.'}>
+                      {recommendation ? (
+                        <Alert severity={riskLevel === 'Élevé' ? 'error' : riskLevel === 'Modéré' ? 'warning' : 'success'} sx={{ borderRadius: 2 }}>
+                          {recommendation}
+                        </Alert>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">N/A</Typography>
+                      )}
+                    </ModuleCard>
+                  </Grid>
+                </Grid>
+              )}
+
+            </Stack>
+          </Box>
+        </Box>
+      </Box>
     </Box>
   );
 }

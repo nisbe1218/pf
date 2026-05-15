@@ -9,6 +9,8 @@ from .views import (
     _build_technical_profile,
     _determine_preprocess_route,
     _call_ollama_qwen_analysis,
+    _build_preprocess_chunks,
+    _build_retrieval_context,
     _apply_llm_correction_plan,
     _build_preprocess_report,
     _dataframe_to_rows,
@@ -52,6 +54,12 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
         dataframe, source_file_name = _read_uploaded_dataframe(uploaded_file)
         technical_profile = _build_technical_profile(dataframe)
 
+        update_session_progress("Découpage intelligent en chunks...")
+        chunks = _build_preprocess_chunks(dataframe, technical_profile)
+        update_session_progress(f"Chunks détectés: {len(chunks)}")
+        retrieval_context = _build_retrieval_context(dataframe, chunks, technical_profile, progress_callback=update_session_progress)
+        update_session_progress(f"Retrieval: {retrieval_context.get('retrieval_policy')}")
+
         # Call LLM (this might take time, hence async)
         if use_llm:
             route = _determine_preprocess_route(technical_profile)
@@ -61,6 +69,7 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
                 update_session_progress(
                     f"Route LLM {route.get('label')} avec {route.get('primary_model')}..."
                 )
+            update_session_progress("Construction du contexte de retrieval...")
             llm_analysis = _call_ollama_qwen_analysis(
                 dataframe,
                 technical_profile,
@@ -91,10 +100,10 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
                 'analysis_pack': analysis_pack,
             }
 
-        update_session_progress("Application des corrections...")
+        update_session_progress("Fusion des résultats déterministes et contextuels...")
         corrected_df, applied_actions = _apply_llm_correction_plan(dataframe, llm_analysis)
         
-        update_session_progress("Génération du rapport...")
+        update_session_progress("Génération du rapport final...")
         report = _build_preprocess_report(
             dataframe,
             technical_profile,
@@ -102,6 +111,9 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
             corrected_df=corrected_df,
             applied_actions=applied_actions,
         )
+
+        report['pipeline'] = llm_analysis.get('pipeline') if isinstance(llm_analysis, dict) else {}
+        report['route'] = llm_analysis.get('route') if isinstance(llm_analysis, dict) else {}
 
         # Build and save session
         update_session_progress("Finalisation...")

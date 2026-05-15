@@ -1,0 +1,608 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Box,
+  Stack,
+  SvgIcon,
+  Typography,
+  Button,
+  Badge,
+  Tooltip,
+  Divider,
+  Drawer,
+  IconButton,
+} from '@mui/material';
+import HomeIcon from '@mui/icons-material/Home';
+import DataObjectOutlinedIcon from '@mui/icons-material/DataObjectOutlined';
+import PsychologyAltOutlinedIcon from '@mui/icons-material/PsychologyAltOutlined';
+import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
+import LogoutIcon from '@mui/icons-material/Logout';
+import MenuIcon from '@mui/icons-material/Menu';
+import CloseIcon from '@mui/icons-material/Close';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useContext } from 'react';
+import { AuthContext } from '../../context/AuthContext';
+
+// ─── Palette cohérente avec le logo ───────────────────────────────────────
+const PALETTE = {
+  darkBlue: '#1e3a8a',
+  brightBlue: '#3b82f6',
+  violet: '#a855f7',
+  cyan: '#06b6d4',
+  pink: '#f472b6',
+  white: '#ffffff',
+  lightGray: '#f8fafc',
+  darkGray: '#0f172a',
+};
+
+
+// Gradient animé en fond de la sidebar
+const SIDEBAR_BG = `
+  linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #f8fafc 100%
+  )
+`;
+
+// ─── Composant KidneySVG ─────────────────────────────────────────────────────
+function KidneySVG() {
+  return (
+    <SvgIcon viewBox="0 0 64 64" sx={{ width: 32, height: 32 }}>
+      {/* Halo externe */}
+      <circle cx="32" cy="32" r="30" fill="none" stroke={PALETTE.brightBlue} strokeWidth="0.8" opacity="0.3" />
+      {/* Rein gauche — bleu cyan */}
+      <path
+        d="M17 20c-4 5-4 12-1 17 3 5 9 7 13 4 4-3 5-8 4-13-1-5-4-9-10-10-4-1-6 0-6 2z"
+        fill="url(#kg)"
+        opacity="1"
+      />
+      {/* Rein droit — rose violet */}
+      <path
+        d="M47 20c4 5 4 12 1 17-3 5-9 7-13 4-4-3-5-8-4-13 1-5 4-9 10-10 4-1 6 0 6 2z"
+        fill="url(#kd)"
+        opacity="1"
+      />
+      {/* Artères */}
+      <path d="M24 25c-2 2-3 6-2 9" stroke={PALETTE.cyan} strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.8" />
+      <path d="M40 25c2 2 3 6 2 9" stroke={PALETTE.violet} strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.8" />
+      <defs>
+        <linearGradient id="kg" x1="14" y1="18" x2="32" y2="42" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor={PALETTE.cyan} />
+          <stop offset="100%" stopColor={PALETTE.brightBlue} />
+        </linearGradient>
+        <linearGradient id="kd" x1="50" y1="18" x2="32" y2="42" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor={PALETTE.pink} />
+          <stop offset="100%" stopColor={PALETTE.violet} />
+        </linearGradient>
+      </defs>
+    </SvgIcon>
+  );
+}
+
+// ─── Composant NavItem ───────────────────────────────────────────────────────
+function NavItem({ icon, label, active, onClick, badge }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <Tooltip title={!expanded ? label : ''} placement="right" arrow
+      componentsProps={{
+        tooltip: {
+          sx: {
+            background: PALETTE.darkBlue,
+            color: '#e0e7ff',
+            border: `1px solid ${PALETTE.brightBlue}33`,
+            borderRadius: '8px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            px: 1.5,
+            py: 0.75,
+            boxShadow: `0 8px 24px rgba(30, 58, 138, 0.2)`,
+          }
+        },
+        arrow: { sx: { color: PALETTE.darkBlue } }
+      }}
+    >
+      <Box
+        onClick={onClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        sx={{
+          position: 'relative',
+          width: 46,
+          height: 46,
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          transition: 'all 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transform: hovered && !active ? 'scale(1.10) translateX(3px)' : active ? 'scale(1.04)' : 'scale(1)',
+          // Fond actif
+          background: active
+            ? 'linear-gradient(135deg, rgba(168,85,247,0.35) 0%, rgba(33,150,243,0.22) 100%)'
+            : hovered
+              ? 'rgba(255,255,255,0.08)'
+              : 'transparent',
+          // Orb glow derrière si actif
+          '&::before': active ? {
+            content: '""',
+            position: 'absolute',
+            inset: -4,
+            borderRadius: '18px',
+            background: activeOrb,
+            filter: 'blur(10px)',
+            zIndex: 0,
+            opacity: 0.8,
+          } : {},
+          // Bordure subtile
+          border: active
+            ? '1px solid rgba(168,85,247,0.5)'
+            : '1px solid transparent',
+          boxShadow: active
+            ? '0 0 20px rgba(168,85,247,0.3), inset 0 1px 0 rgba(255,255,255,0.1)'
+            : 'none',
+          zIndex: 1,
+        }}
+      >
+        {/* Indicator bar gauche */}
+        {active && (
+          <Box sx={{
+            position: 'absolute',
+            left: -14,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 3,
+            height: 24,
+            borderRadius: '0 3px 3px 0',
+            background: 'linear-gradient(180deg, #00d4ff 0%, #a855f7 50%, #f472b6 100%)',
+            boxShadow: '0 0 10px rgba(0,212,255,0.6)',
+          }} />
+        )}
+
+        {/* Badge */}
+        {badge ? (
+          <Badge
+            badgeContent={badge}
+            color="error"
+            sx={{
+              '& .MuiBadge-badge': {
+                fontSize: 9,
+                minWidth: 14,
+                height: 14,
+                top: 3,
+                right: 3,
+                background: 'linear-gradient(135deg, #ec4899, #f97316)',
+                border: '1.5px solid rgba(10,22,40,0.8)',
+                boxShadow: '0 0 8px rgba(236,72,153,0.6)',
+              }
+            }}
+          >
+            <Box sx={{
+              color: active ? '#e2e8f0' : hovered ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.45)',
+              transition: 'color 180ms ease',
+              display: 'flex',
+              position: 'relative',
+              zIndex: 2,
+            }}>
+              {icon}
+            </Box>
+          </Badge>
+        ) : (
+          <Box sx={{
+            color: active
+              ? '#ffffff'
+              : hovered
+                ? 'rgba(255,255,255,0.85)'
+                : 'rgba(255,255,255,0.4)',
+            transition: 'color 180ms ease',
+            display: 'flex',
+            position: 'relative',
+            zIndex: 2,
+          }}>
+            {icon}
+          </Box>
+        )}
+      </Box>
+    </Tooltip>
+  );
+}
+
+// ─── Composant principal AppSidebar ─────────────────────────────────────────
+function AppSidebar() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { logout } = useContext(AuthContext);
+
+  const isDashboardActive = location.pathname.startsWith('/dashboard');
+  const isPatientsActive  = location.pathname.startsWith('/patients');
+  const isModelAiActive   = location.pathname.startsWith('/modele-ai');
+
+  const [pendingPatientImportStatus, setPendingPatientImportStatus] = useState(null);
+  const [notificationAnchorEl, setNotificationAnchorEl] = useState(null);
+  const [pulse, setPulse] = useState(false);
+  const pulseRef = useRef(null);
+
+  // Sync badge
+  useEffect(() => {
+    const updateStatus = () => {
+      try {
+        const saved = localStorage.getItem('patients_insert_validation_status');
+        const status = saved ? JSON.parse(saved) : null;
+        setPendingPatientImportStatus(status?.status === 'pending' ? status : null);
+      } catch {
+        setPendingPatientImportStatus(null);
+      }
+    };
+    updateStatus();
+    window.addEventListener('patientsInsertValidationUpdated', updateStatus);
+    window.addEventListener('storage', updateStatus);
+    return () => {
+      window.removeEventListener('patientsInsertValidationUpdated', updateStatus);
+      window.removeEventListener('storage', updateStatus);
+    };
+  }, []);
+
+  // Pulse animation périodique sur le logo
+  useEffect(() => {
+    pulseRef.current = setInterval(() => {
+      setPulse(true);
+      setTimeout(() => setPulse(false), 1200);
+    }, 5000);
+    return () => clearInterval(pulseRef.current);
+  }, []);
+
+  return (
+    <>
+      {/* ── Sidebar container ─────────────────────────────────────────────── */}
+      <Box
+        sx={{
+          position: { md: 'fixed' },
+          top: { md: '50%' },
+          left: { md: 16 },
+          transform: { md: 'translateY(-50%)' },
+          zIndex: 1200,
+          display: 'flex',
+          flexDirection: { xs: 'row', md: 'column' },
+          alignItems: 'center',
+          gap: 0.5,
+          px: { xs: 2, md: 1 },
+          py: { xs: 1, md: 2 },
+          width: { xs: 'auto', md: 64 },
+
+          // Corps principal — verre sombre avec gradient
+          background: SIDEBAR_BG,
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderRadius: { xs: '20px', md: '28px' },
+
+          // Bordure lumineuse subtile
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: `
+            0 32px 80px rgba(0,0,0,0.55),
+            0 0 0 1px rgba(168,85,247,0.12),
+            inset 0 1px 0 rgba(255,255,255,0.06),
+            0 0 60px rgba(33,150,243,0.06)
+          `,
+
+          // Ligne lumineuse en haut (highlight)
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: '20%',
+            right: '20%',
+            height: '1px',
+            background: 'linear-gradient(90deg, transparent, rgba(0,212,255,0.6), rgba(168,85,247,0.6), transparent)',
+            borderRadius: '50%',
+          },
+
+          // Lueur colorée sous la sidebar
+          '&::after': {
+            content: '""',
+            position: 'absolute',
+            bottom: -20,
+            left: '10%',
+            right: '10%',
+            height: 20,
+            background: 'radial-gradient(ellipse, rgba(168,85,247,0.2) 0%, transparent 70%)',
+            filter: 'blur(8px)',
+          },
+        }}
+      >
+        {/* ── Logo animé ──────────────────────────────────────────────────── */}
+        <Box
+          sx={{
+            position: 'relative',
+            width: 42,
+            height: 42,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            mb: { xs: 0, md: 1 },
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onClick={() => navigate('/dashboard')}
+        >
+          {/* Halo pulsant */}
+          <Box sx={{
+            position: 'absolute',
+            inset: -6,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(0,212,255,0.18) 0%, rgba(168,85,247,0.12) 60%, transparent 75%)',
+            animation: pulse ? 'sidebarPulse 1.2s ease-out' : 'none',
+            '@keyframes sidebarPulse': {
+              '0%':   { transform: 'scale(1)',    opacity: 1 },
+              '50%':  { transform: 'scale(1.6)', opacity: 0.5 },
+              '100%': { transform: 'scale(2)',   opacity: 0 },
+            },
+          }} />
+          {/* Fond circulaire */}
+          <Box sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(168,85,247,0.15) 100%)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: '0 0 16px rgba(0,212,255,0.2), 0 0 16px rgba(168,85,247,0.15)',
+          }} />
+          <KidneySVG />
+        </Box>
+
+        {/* ── Divider ─────────────────────────────────────────────────────── */}
+        <Divider />
+
+        {/* ── Navigation principale ───────────────────────────────────────── */}
+        <NavItem
+          icon={<HomeIcon sx={{ fontSize: 19 }} />}
+          label="Dashboard"
+          active={isDashboardActive}
+          onClick={() => navigate('/dashboard')}
+        />
+        <NavItem
+          icon={<DataObjectOutlinedIcon sx={{ fontSize: 19 }} />}
+          label="Patients"
+          active={isPatientsActive}
+          onClick={() => navigate('/patients')}
+        />
+        <NavItem
+          icon={<PsychologyAltOutlinedIcon sx={{ fontSize: 19 }} />}
+          label="Modèle AI"
+          active={isModelAiActive}
+          onClick={() => navigate('/modele-ai')}
+        />
+
+        {/* ── Divider ─────────────────────────────────────────────────────── */}
+        <Divider />
+
+        {/* ── Notifications ───────────────────────────────────────────────── */}
+        <NavItem
+          icon={<NotificationsActiveOutlinedIcon sx={{ fontSize: 19 }} />}
+          label="Notifications"
+          active={false}
+          badge={pendingPatientImportStatus ? 1 : 0}
+          onClick={(e) => setNotificationAnchorEl(e.currentTarget)}
+        />
+
+        {/* ── Divider ─────────────────────────────────────────────────────── */}
+        <Divider />
+
+        {/* ── Logout ──────────────────────────────────────────────────────── */}
+        <LogoutButton onClick={() => { logout(); navigate('/login'); }} />
+      </Box>
+
+      {/* ── Popover notifications ──────────────────────────────────────────── */}
+      <Popover
+        open={Boolean(notificationAnchorEl)}
+        anchorEl={notificationAnchorEl}
+        onClose={() => setNotificationAnchorEl(null)}
+        anchorOrigin={{ vertical: 'center', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'center', horizontal: 'left' }}
+        PaperProps={{
+          sx: {
+            width: 360,
+            borderRadius: '20px',
+            overflow: 'hidden',
+            background: 'linear-gradient(160deg, #0d1b35 0%, #13082a 100%)',
+            border: '1px solid rgba(168,85,247,0.2)',
+            boxShadow: '0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,212,255,0.08)',
+            ml: 1.5,
+          }
+        }}
+      >
+        {/* Header popover */}
+        <Box sx={{
+          px: 2.5,
+          pt: 2.5,
+          pb: 2,
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: 'linear-gradient(90deg, rgba(0,212,255,0.06), rgba(168,85,247,0.06))',
+        }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Box>
+              <Typography sx={{ color: '#e2e8f0', fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.01em' }}>
+                Notifications
+              </Typography>
+              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.72rem', mt: 0.25 }}>
+                {pendingPatientImportStatus ? '1 alerte en attente' : 'Aucune nouvelle alerte'}
+              </Typography>
+            </Box>
+            {pendingPatientImportStatus && (
+              <Button
+                size="small"
+                onClick={() => setNotificationAnchorEl(null)}
+                sx={{
+                  fontSize: '0.7rem',
+                  color: 'rgba(0,212,255,0.8)',
+                  border: '1px solid rgba(0,212,255,0.2)',
+                  borderRadius: '8px',
+                  px: 1.25,
+                  py: 0.4,
+                  minWidth: 0,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  '&:hover': { background: 'rgba(0,212,255,0.08)', borderColor: 'rgba(0,212,255,0.4)' },
+                }}
+              >
+                Marquer lu
+              </Button>
+            )}
+          </Stack>
+        </Box>
+
+        {/* Body popover */}
+        <Box sx={{ p: 2 }}>
+          {pendingPatientImportStatus ? (
+            <Box sx={{
+              p: 2,
+              borderRadius: '14px',
+              background: 'linear-gradient(135deg, rgba(168,85,247,0.12) 0%, rgba(33,150,243,0.08) 100%)',
+              border: '1px solid rgba(168,85,247,0.2)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            }}>
+              <Stack direction="row" spacing={2} alignItems="flex-start">
+                {/* Icône avatar */}
+                <Box sx={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #7c3aed, #2196f3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 0 16px rgba(124,58,237,0.45)',
+                  flexShrink: 0,
+                }}>
+                  <NotificationsActiveOutlinedIcon sx={{ fontSize: 20, color: 'white' }} />
+                </Box>
+
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.75 }}>
+                    <Typography sx={{ color: '#e2e8f0', fontWeight: 700, fontSize: '0.82rem' }}>
+                      Importation en attente
+                    </Typography>
+                    <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.68rem' }}>
+                      {pendingPatientImportStatus.timestamp
+                        ? new Date(pendingPatientImportStatus.timestamp).toLocaleTimeString('fr-FR')
+                        : 'à l\'instant'}
+                    </Typography>
+                  </Stack>
+                  <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem', lineHeight: 1.5, mb: 1.25 }}>
+                    Les données importées nécessitent une validation pour être visibles sur toute la plateforme.
+                  </Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box sx={{
+                      px: 1.25,
+                      py: 0.35,
+                      borderRadius: '6px',
+                      background: 'rgba(251,146,60,0.12)',
+                      border: '1px solid rgba(251,146,60,0.25)',
+                      color: '#fb923c',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}>
+                      EN ATTENTE
+                    </Box>
+                    <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.72rem' }}>
+                      {pendingPatientImportStatus.requestedBy || 'Utilisateur'}
+                    </Typography>
+                  </Stack>
+                </Box>
+              </Stack>
+            </Box>
+          ) : (
+            <Box sx={{ py: 3, textAlign: 'center' }}>
+              <Box sx={{
+                width: 48,
+                height: 48,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mx: 'auto',
+                mb: 1.5,
+              }}>
+                <NotificationsActiveOutlinedIcon sx={{ fontSize: 22, color: 'rgba(255,255,255,0.2)' }} />
+              </Box>
+              <Typography sx={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem' }}>
+                Aucune notification
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Popover>
+    </>
+  );
+}
+
+// ─── Sous-composants internes ────────────────────────────────────────────────
+
+function Divider() {
+  return (
+    <Box sx={{
+      width: { xs: 1, md: 28 },
+      height: { xs: 28, md: 1 },
+      flexShrink: 0,
+      my: { xs: 0, md: 0.25 },
+      mx: { xs: 0.5, md: 'auto' },
+      background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent)',
+      borderRadius: 1,
+    }} />
+  );
+}
+
+function LogoutButton({ onClick }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <Tooltip title="Déconnexion" placement="right" arrow
+      componentsProps={{
+        tooltip: {
+          sx: {
+            background: 'linear-gradient(135deg, #3b0a0a 0%, #1a0a2e 100%)',
+            color: '#fca5a5',
+            border: '1px solid rgba(239,68,68,0.25)',
+            borderRadius: '10px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            px: 1.5,
+            py: 0.75,
+          }
+        },
+        arrow: { sx: { color: '#3b0a0a' } },
+      }}
+    >
+      <Box
+        onClick={onClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        sx={{
+          width: 46,
+          height: 46,
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          transition: 'all 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transform: hovered ? 'scale(1.10)' : 'scale(1)',
+          background: hovered
+            ? 'linear-gradient(135deg, rgba(239,68,68,0.18) 0%, rgba(168,40,40,0.12) 100%)'
+            : 'transparent',
+          border: hovered
+            ? '1px solid rgba(239,68,68,0.3)'
+            : '1px solid transparent',
+          boxShadow: hovered ? '0 0 16px rgba(239,68,68,0.2)' : 'none',
+          color: hovered ? '#f87171' : 'rgba(255,150,150,0.4)',
+        }}
+      >
+        <LogoutIcon sx={{ fontSize: 19, transition: 'color 180ms ease' }} />
+      </Box>
+    </Tooltip>
+  );
+}
+
+export default AppSidebar;

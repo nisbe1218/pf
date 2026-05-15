@@ -7,39 +7,50 @@ import Login from './pages/auth/Login';
 import Unauthorized from './pages/unauthorized/Unauthorized';
 import PatientsManagement from './pages/patients/PatientsManagement';
 import ModelAI from './pages/model-ai/ModelAI';
+import Preprocessing from './pages/preprocessing/Preprocessing';
+import Profile from './pages/profile/Profile';
+import MonitorBoard from './pages/monitor/MonitorBoard';
 import ProtectedRoute from './components/common/ProtectedRoute';
+import NotesFab from './components/common/NotesFab';
 import { AuthProvider } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
 
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <Box
-          sx={{ width: '100%', minHeight: '100vh', pt: 0, pb: 4, px: 0, mx: 0, minWidth: 0, overflowX: 'hidden' }}
-        >
-          <Routes>
-            {/* Page d’accueil publique */}
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/unauthorized" element={<Unauthorized />} />
+      <LanguageProvider>
+        <Router>
+          <Box
+            sx={{ width: '100%', minHeight: '100vh', pt: 0, pb: 4, px: 0, mx: 0, minWidth: 0, overflowX: 'hidden' }}
+          >
+            <Routes>
+              {/* Page d’accueil publique */}
+              <Route path="/" element={<Landing />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/unauthorized" element={<Unauthorized />} />
 
-            {/* Routes Protégées (Tous les rôles connectés) */}
-            <Route element={<ProtectedRoute />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/modele-ai" element={<ModelAI />} />
-            </Route>
+              {/* Routes Protégées (Tous les rôles connectés) */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/modele-ai" element={<ModelAI />} />
+                <Route path="/monitor" element={<MonitorBoard />} />
+                <Route path="/profil" element={<Profile />} />
+              </Route>
 
-            <Route element={<ProtectedRoute allowedRoles={['super_admin', 'chef_service']} />}>
-              <Route path="/patients" element={<PatientsManagement />} />
-            </Route>
+              <Route element={<ProtectedRoute allowedRoles={['super_admin', 'chef_service', 'professeur', 'resident']} />}>
+                <Route path="/patients" element={<PatientsManagement />} />
+                <Route path="/preprocessing" element={<Preprocessing />} />
+              </Route>
 
-            {/* Les autres rôles viendront ici (ex: routes admin, route patients) */}
+              {/* Les autres rôles viendront ici (ex: routes admin, route patients) */}
 
-            {/* Redirection par défaut */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Box>
-      </Router>
+              {/* Redirection par défaut */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <NotesFab />
+          </Box>
+        </Router>
+      </LanguageProvider>
     </AuthProvider>
   );
 }

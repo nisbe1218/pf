@@ -3,6 +3,11 @@ from rest_framework import serializers
 from .models import Patient, PatientFormTemplate, PatientFormField
 
 
+EXCLUDED_SCHEMA_FIELD_KEYS = {
+    'irc_duree_suivi_predialytique_mois',
+}
+
+
 class PatientSerializer(serializers.ModelSerializer):
     extra_data = serializers.JSONField(required=False, default=dict)
     nom = serializers.CharField(required=False, allow_blank=True)
@@ -51,16 +56,13 @@ class PatientSerializer(serializers.ModelSerializer):
             'irc_connue_avant_dialyse',
             'irc_source_adressage',
             'irc_contexte_debut_dialyse',
-            'irc_duree_suivi_predialytique_mois',
             'irc_themes_education_therapeutique',
             'irc_niveau_comprehension_patient',
             'irc_preference_therapie_renale',
+            'icc_charlson',
             'comorbidite_statut_diabete',
             'comorbidite_liste',
             'comorbidite_autre',
-            'icc_charlson',
-            'comorbidite_exposition_toxique',
-            'comorbidite_antecedents_medicaments_nephrotoxiques',
             'presentation_date_episode',
             'presentation_lieu_debut',
             'presentation_raisons_debut',
@@ -76,7 +78,6 @@ class PatientSerializer(serializers.ModelSerializer):
             'presentation_autonomie_fonctionnelle',
             'presentation_notes_examen_clinique',
             'biologie_date_prelevement',
-            'biologie_dfg_mdrd_ml_min_1_73m2',
             'biologie_creatinine_mg_l',
             'biologie_uree_g_l',
             'biologie_hemoglobine_g_dl',
@@ -117,11 +118,6 @@ class PatientSerializer(serializers.ModelSerializer):
             'dialyse_site_acces_initial',
             'dialyse_date_creation_acces',
             'dialyse_date_premiere_utilisation_acces',
-            'dialyse_jours_entre_catheter_et_fav',
-            'dialyse_acces_admission_tunnelise',
-            'dialyse_acces_admission_femoral',
-            'dialyse_acces_admission_fav',
-            'dialyse_acces_admission_peritoneale',
             'dialyse_seances_par_semaine',
             'dialyse_duree_seance_min',
             'dialyse_debit_sanguin_ml_min',
@@ -135,8 +131,6 @@ class PatientSerializer(serializers.ModelSerializer):
             'dialyse_volume_stase_dp_ml',
             'dialyse_information_transplantation_donnee',
             'dialyse_statut_liste_attente_transplantation',
-            'transplantation_bilan_pretransplantation',
-            'immunologie_transfusion_immunisation',
             'qualite_date_evaluation',
             'qualite_spktv',
             'qualite_urr_pct',
@@ -149,12 +143,6 @@ class PatientSerializer(serializers.ModelSerializer):
             'qualite_seances_raccourcies_30j',
             'qualite_hypotensions_intradialytiques_30j',
             'qualite_observance_declaree_patient',
-            'education_connaissance_pratique_dialyse',
-            'education_soins_acces_vasculaire',
-            'education_surveillance_poids_fluides',
-            'education_dietetique',
-            'education_traitements_associes',
-            'education_complications',
             'traitement_medicaments_renaux_actuels',
             'traitement_autres_notes',
             'complication_debut_periode_suivi',
@@ -170,12 +158,12 @@ class PatientSerializer(serializers.ModelSerializer):
             'devenir_statut',
             'devenir_date_deces',
             'devenir_cause_deces',
-            'devenir_delai_deces_jours',
             'devenir_date_transplantation',
             'devenir_qualite_vie',
             'devenir_categorie_pronostique',
             'devenir_notes',
             'demographie_data',
+            'irc_data',
             'comorbidite_data',
             'presentation_data',
             'biologie_data',
@@ -212,6 +200,9 @@ class PatientFormTemplateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data['fields'] = [
             field for field in data.get('fields', [])
-            if field.get('key') and not field.get('key').startswith('unnamed') and field.get('source_hint') != 'auto_detected_from_data_import'
+            if field.get('key')
+            and field.get('key') not in EXCLUDED_SCHEMA_FIELD_KEYS
+            and not field.get('key').startswith('unnamed')
+            and field.get('source_hint') != 'auto_detected_from_data_import'
         ]
         return data
