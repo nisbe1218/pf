@@ -23,4 +23,7 @@ urlpatterns = [
     path('api/patients/', include('patients.urls')),
     path('api/audit/', include('audit.urls')),
     path('api/predictions/', include('predictions.urls')),
+    
+    # Ajouter cette ligne pour le prétraitement
+    path('patients/preprocess/', include('preprocess.urls')),  # <-- NOUVEAU
 ]

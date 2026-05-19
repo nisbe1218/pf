@@ -7,6 +7,8 @@ from urllib import request as urllib_request
 
 import pandas as pd
 
+from .llm_client import run_embeddings, get_embedding_model_name, get_llm_model_name, get_llm_base_url
+
 try:
     import chromadb
 except Exception:  # pragma: no cover - optional dependency
@@ -32,26 +34,42 @@ def _env_int(name, default):
         return int(default)
 
 
-def _get_ollama_candidate_bases():
-    # Prefer explicit base set by docker/env: OLLAMA_BASE_URL
-    configured_base = str(os.environ.get('OLLAMA_BASE_URL', '') or os.environ.get('OLLAMA_URL', '')).rstrip('/')
-    fallback_base = str(os.environ.get('OLLAMA_FALLBACK_URL', '')).rstrip('/')
-    running_in_docker = os.path.exists('/.dockerenv')
-    # Use host.docker.internal inside containers by default when provided by env.
-    # Fallback to 'http://ollama:11434' for legacy compose setups when running in docker,
-    # otherwise use localhost for local development.
-    default_base = 'http://ollama:11434' if running_in_docker else 'http://127.0.0.1:11434'
-
-    candidate_bases = []
-    for base in [configured_base, fallback_base, default_base]:
-        normalized_base = str(base).rstrip('/')
-        if normalized_base and normalized_base not in candidate_bases:
-            candidate_bases.append(normalized_base)
-    return candidate_bases
+def _get_llm_candidate_bases():
+    # Use configured LLM base url from llm_client or environment fallbacks
+    base = get_llm_base_url() or os.environ.get('LITELLM_BASE_URL') or os.environ.get('VLLM_BASE_URL')
+    if not base:
+        return []
+    return [str(base).rstrip('/')]
 
 
 def _get_embedding_model_name():
-    return os.environ.get('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text')
+    return get_embedding_model_name('nomic-embed-text')
+
+
+def _get_primary_model_name():
+    model_name = (
+        os.environ.get('LLM_PREPROCESS_MODEL')
+        or os.environ.get('LITELLM_MODEL')
+        or os.environ.get('VLLM_MODEL')
+        or os.environ.get('OLLAMA_PREPROCESS_MODEL')
+        or os.environ.get('OLLAMA_MODEL')
+    )
+    if model_name:
+        return model_name
+    return get_llm_model_name()
+
+
+def _bounded_env_int(name, default, minimum=None, maximum=None):
+    try:
+        value = int(os.environ.get(name, default))
+    except Exception:
+        value = int(default)
+
+    if minimum is not None:
+        value = max(int(minimum), value)
+    if maximum is not None:
+        value = min(int(maximum), value)
+    return value
 
 
 def _get_chroma_persist_dir():
@@ -182,48 +200,17 @@ def _summarize_chunk(dataframe, chunk, technical_profile):
         'top_missing_columns': top_missing_columns,
         'critical_signals': critical_signals,
         'deterministic_summary': deterministic_summary,
-        'embedding_text': embedding_text,
+        'embedding_text': embedding_text[:1500] + ('... [tronqu�]' if len(embedding_text) > 1500 else ''),
+        'full_text': embedding_text,
     }
 
 
 def _embed_texts_with_ollama(texts):
     model_name = _get_embedding_model_name()
-    timeout_seconds = _env_int('OLLAMA_EMBEDDING_TIMEOUT_SECONDS', 60)
-    embeddings = []
-
-    for text in texts:
-        text = str(text or '').strip()
-        if not text:
-            embeddings.append([])
-            continue
-
-        embedded = None
-        for ollama_base in _get_ollama_candidate_bases():
-            ollama_endpoint = f'{ollama_base}/api/embeddings'
-            request_payload = {
-                'model': model_name,
-                'prompt': text,
-            }
-            request_data = json.dumps(request_payload).encode('utf-8')
-            req = urllib_request.Request(
-                ollama_endpoint,
-                data=request_data,
-                headers={'Content-Type': 'application/json'},
-                method='POST',
-            )
-            try:
-                with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
-                    body = response.read().decode('utf-8')
-                payload = json.loads(body)
-                vector = payload.get('embedding') or payload.get('embeddings')
-                if isinstance(vector, list) and vector and isinstance(vector[0], (int, float)):
-                    embedded = [float(value) for value in vector]
-                    break
-            except Exception:
-                continue
-
-        embeddings.append(embedded or [])
-
+    timeout_seconds = _env_int('LLM_EMBEDDING_TIMEOUT_SECONDS', _env_int('OLLAMA_EMBEDDING_TIMEOUT_SECONDS', 60))
+    embeddings = run_embeddings(texts, model=model_name, timeout_seconds=timeout_seconds)
+    if not embeddings or len(embeddings) != len(texts):
+        return [[] for _ in texts]
     return embeddings
 
 
@@ -557,66 +544,83 @@ def build_section_fusion(chunk_summaries, llm_analysis=None):
 
 
 def estimate_route(technical_profile):
+    technical_profile = technical_profile if isinstance(technical_profile, dict) else {}
     rows = int(technical_profile.get('rows') or 0)
     columns = int(technical_profile.get('columns') or 0)
     missing_pct = float(technical_profile.get('missing_pct') or 0.0)
     duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
-    outlier_total = sum(int(item.get('outlier_count') or 0) for item in (technical_profile.get('numeric_columns_profile') or []))
-    critical_columns = 0
-    ambiguous_columns = 0
-    critical_tokens = [
-        'deces', 'dialyse', 'biologie', 'albumine', 'hemoglobine', 'creatinine',
-        'infection', 'transplant', 'complication', 'urgence', 'cardio', 'renal',
-    ]
+    critical_anomalies = technical_profile.get('critical_anomalies') or []
+    high_anomalies = technical_profile.get('high_anomalies') or []
+    chunk_count = int(technical_profile.get('chunk_count') or 0)
 
-    for column_meta in technical_profile.get('columns_profile', []):
-        column_name = _normalize_text(column_meta.get('column'))
-        column_missing_pct = float(column_meta.get('missing_pct') or 0.0)
-        if any(token in column_name for token in critical_tokens):
-            if column_missing_pct >= 15 or not column_meta.get('sample_values'):
-                critical_columns += 1
-        if column_missing_pct >= 25:
-            ambiguous_columns += 1
+    llm_allowed = True
+    if rows * columns > 100000:
+        llm_allowed = False
+    if len(critical_anomalies) > 25:
+        llm_allowed = False
+    if chunk_count > 80:
+        llm_allowed = False
 
-    clinical_complexity_score = (critical_columns * 3) + (ambiguous_columns * 2) + outlier_total + (2 if duplicate_rows else 0)
-
-    if rows <= 50 and columns <= 15 and missing_pct == 0 and duplicate_rows == 0 and outlier_total == 0 and clinical_complexity_score == 0:
-        return {
-            'mode': 'deterministic',
-            'label': 'deterministic_only',
-            'reason': 'Dataset simple: pas de LLM necessaire.',
-            'primary_model': None,
-            'fallback_model': None,
-            'primary_timeout_seconds': 0,
-            'fallback_timeout_seconds': 0,
-            'primary_num_predict': 0,
-            'fallback_num_predict': 0,
-            'clinical_complexity_score': clinical_complexity_score,
-        }
-
-    if clinical_complexity_score >= 6 or rows > 300 or columns > 40 or missing_pct >= 10 or duplicate_rows > 0 or outlier_total > 5:
-        return {
-            'mode': 'advanced',
-            'label': 'advanced_medical',
-            'reason': 'Dataset medical complexe ou ambigu: modele 14B priorisé.',
-            'primary_model': os.environ.get('OLLAMA_ADVANCED_MODEL', 'qwen2.5:14b-instruct'),
-            'fallback_model': os.environ.get('OLLAMA_BALANCED_MODEL', os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct'))),
-            'primary_timeout_seconds': _env_int('OLLAMA_ADVANCED_TIMEOUT_SECONDS', _env_int('OLLAMA_PRIMARY_TIMEOUT_SECONDS', min(_env_int('OLLAMA_TIMEOUT_SECONDS', 420), 180))),
-            'fallback_timeout_seconds': _env_int('OLLAMA_FALLBACK_TIMEOUT_SECONDS', _env_int('OLLAMA_TIMEOUT_SECONDS', 420)),
-            'primary_num_predict': _env_int('OLLAMA_ADVANCED_NUM_PREDICT', _env_int('OLLAMA_NUM_PREDICT', 32)),
-            'fallback_num_predict': _env_int('OLLAMA_NUM_PREDICT', 32),
-            'clinical_complexity_score': clinical_complexity_score,
-        }
+    primary_timeout_seconds = _bounded_env_int(
+        'LLM_PRIMARY_TIMEOUT_SECONDS',
+        _env_int('LLM_PRIMARY_TIMEOUT_SECONDS', _env_int('LITELLM_PRIMARY_TIMEOUT_SECONDS', _env_int('OLLAMA_PRIMARY_TIMEOUT_SECONDS', 180))),
+        minimum=60,
+        maximum=240,
+    )
+    fallback_timeout_seconds = _bounded_env_int(
+        'LLM_FALLBACK_TIMEOUT_SECONDS',
+        _env_int('LLM_FALLBACK_TIMEOUT_SECONDS', _env_int('LITELLM_FALLBACK_TIMEOUT_SECONDS', _env_int('OLLAMA_FALLBACK_TIMEOUT_SECONDS', 300))),
+        minimum=90,
+        maximum=300,
+    )
+    primary_num_predict = _bounded_env_int(
+        'LLM_PASS1_MAX_TOKENS',
+        _env_int('LLM_PASS1_MAX_TOKENS', _env_int('LITELLM_NUM_PREDICT', _env_int('OLLAMA_NUM_PREDICT', 256))),
+        minimum=64,
+        maximum=512,
+    )
+    fallback_num_predict = _bounded_env_int(
+        'LLM_RETRY_MAX_TOKENS',
+        _env_int('LLM_RETRY_MAX_TOKENS', _env_int('LITELLM_RETRY_NUM_PREDICT', _env_int('OLLAMA_RETRY_NUM_PREDICT', 384))),
+        minimum=128,
+        maximum=768,
+    )
 
     return {
-        'mode': 'balanced',
-        'label': 'balanced_default',
-        'reason': 'Dataset standard: modele equilibré priorisé.',
-        'primary_model': os.environ.get('OLLAMA_BALANCED_MODEL', os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct'))),
-        'fallback_model': os.environ.get('OLLAMA_FAST_MODEL', 'qwen2.5:3b-instruct'),
-        'primary_timeout_seconds': _env_int('OLLAMA_PRIMARY_TIMEOUT_SECONDS', min(_env_int('OLLAMA_TIMEOUT_SECONDS', 420), 180)),
-        'fallback_timeout_seconds': _env_int('OLLAMA_FALLBACK_TIMEOUT_SECONDS', _env_int('OLLAMA_TIMEOUT_SECONDS', 420)),
-        'primary_num_predict': _env_int('OLLAMA_NUM_PREDICT', 32),
-        'fallback_num_predict': _env_int('OLLAMA_RETRY_NUM_PREDICT', 24),
-        'clinical_complexity_score': clinical_complexity_score,
+        'mode': 'rag_llm' if llm_allowed else 'deterministic_first',
+        'label': 'rag_llm_default' if llm_allowed else 'deterministic_first_sla',
+        'reason': 'Analyse LLM+RAG activée par défaut.' if llm_allowed else 'Routage déterministe: contexte RAG trop lourd pour le SLA LLM.',
+        'primary_model': _get_primary_model_name(),
+        'primary_timeout_seconds': primary_timeout_seconds,
+        'fallback_timeout_seconds': fallback_timeout_seconds,
+        'primary_num_predict': primary_num_predict,
+        'fallback_num_predict': fallback_num_predict,
+        'clinical_complexity_score': int(rows * 0.3 + columns * 0.2 + missing_pct + duplicate_rows * 2 + len(high_anomalies) * 2),
+        'llm_allowed': llm_allowed,
     }
+
+
+def should_use_llm(technical_profile, payload=None):
+    technical_profile = technical_profile if isinstance(technical_profile, dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+
+    rows = int(technical_profile.get('rows') or 0)
+    columns = int(technical_profile.get('columns') or 0)
+    chunk_count = int(technical_profile.get('chunk_count') or 0)
+    critical_anomalies = list(payload.get('critical_anomalies') or technical_profile.get('critical_anomalies') or [])
+    suspect_columns = list(payload.get('suspect_columns') or technical_profile.get('suspect_columns') or [])
+    llm_safe_ratio = float(payload.get('llm_filter_ratio') or 0.0)
+    llm_safe_size = len(str(payload.get('llm_safe') or {}))
+
+    if llm_safe_size > 50000:
+        return False
+    if rows * columns > 100000:
+        return False
+    if len(critical_anomalies) > 25:
+        return False
+    if chunk_count > 80:
+        return False
+    if len(suspect_columns) > 15 and llm_safe_ratio < 0.35:
+        return False
+    return True
+

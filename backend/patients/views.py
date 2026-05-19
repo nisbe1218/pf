@@ -4,12 +4,14 @@ import uuid
 import json
 import os
 import io
+import logging
 from datetime import datetime, timedelta
 from http.client import RemoteDisconnected
 from urllib import request as urllib_request
 from urllib import error as urllib_error
-
+from patients.tasks import analyze_preprocess_async
 import pandas as pd
+import numpy as np
 from django.db import connection
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -28,7 +30,18 @@ from audit.models import AuditLog
 
 from .models import Patient, PatientFormField, PatientFormTemplate
 from .serializers import PatientFormTemplateSerializer, PatientSerializer
-from .preprocess_rag import build_rag_context, estimate_route
+from .preprocess_rag import build_rag_context, estimate_route, should_use_llm
+from .llm_client import check_llm_health, get_llm_model_name, get_system_prompt, run_json_completion
+
+try:
+    from sklearn.ensemble import IsolationForest
+    from sklearn.impute import SimpleImputer
+except Exception:  # pragma: no cover - optional dependency
+    IsolationForest = None
+    SimpleImputer = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class CustomJSONEncoder(json.JSONEncoder):
@@ -127,6 +140,47 @@ def normalize_header(value):
     text = text.encode('ascii', 'ignore').decode('ascii')
     text = re.sub(r'[^a-z0-9]+', '_', text)
     return text.strip('_')
+
+
+def anomaly_score(column_name, value, anomaly_type=None):
+    score = 0
+    if value is None or (isinstance(value, float) and value != value):
+        score += 1
+
+    normalized = normalize_header(column_name)
+    critical_tokens = ['creatinine', 'potassium', 'sodium', 'hemoglobine', 'albumine', 'uree', 'age', 'dialyse', 'deces']
+    if any(token in normalized for token in critical_tokens):
+        score += 5
+
+    numeric_value = None
+    if value is not None:
+        try:
+            numeric_value = float(str(value).replace(',', '.'))
+        except Exception:
+            numeric_value = None
+
+    medical_limits = {
+        'creatinine': {'low': 0.0, 'high': 200.0},
+        'potassium': {'low': 2.5, 'high': 6.5},
+        'sodium': {'low': 125.0, 'high': 155.0},
+        'age': {'low': 0.0, 'high': 120.0},
+        'hemoglobine': {'low': 7.0, 'high': 20.0},
+        'albumine': {'low': 25.0, 'high': 55.0},
+        'uree': {'low': 0.0, 'high': 100.0},
+    }
+    for token, limits in medical_limits.items():
+        if token not in normalized or numeric_value is None:
+            continue
+        if numeric_value < 0:
+            score += 10
+        if numeric_value < limits['low'] or numeric_value > limits['high']:
+            score += 8
+        break
+
+    if anomaly_type == 'invalid_value':
+        score += 2
+
+    return score
 
 
 def _format_patient_audit_value(value):
@@ -1387,6 +1441,11 @@ def _build_technical_profile(dataframe):
     columns_profile = []
     numeric_columns_profile = []
     categorical_columns_profile = []
+    suspect_columns = []
+    anomaly_records = []
+    missing_data_rate = {}
+    statistics = {}
+    numeric_matrix_columns = []
     total_rows = int(len(dataframe.index))
     total_columns = int(len(dataframe.columns))
     total_cells = total_rows * total_columns
@@ -1413,28 +1472,76 @@ def _build_technical_profile(dataframe):
             'sample_values': sample_values,
         }
         columns_profile.append(column_profile)
+        missing_data_rate[str(column)] = round((missing_count / total_rows), 4) if total_rows else 0.0
+
+        normalized_column = normalize_header(str(column))
+        if column_profile['missing_pct'] >= 30.0 or (non_null_count > 0 and series.astype(str).nunique(dropna=True) <= 1):
+            suspect_columns.append(str(column))
 
         if pd.api.types.is_numeric_dtype(series):
             numeric_series = pd.to_numeric(series, errors='coerce').dropna()
             if not numeric_series.empty:
+                numeric_matrix_columns.append(str(column))
+                numeric_values = numeric_series.to_numpy(dtype=float)
+                numeric_mean = float(numeric_series.mean())
+                numeric_std = float(numeric_series.std(ddof=0)) if numeric_series.count() > 1 else 0.0
+                numeric_median = float(numeric_series.median())
                 q1 = float(numeric_series.quantile(0.25))
                 q3 = float(numeric_series.quantile(0.75))
                 iqr = q3 - q1
                 lower_bound = q1 - (1.5 * iqr)
                 upper_bound = q3 + (1.5 * iqr)
                 outlier_count = int(((numeric_series < lower_bound) | (numeric_series > upper_bound)).sum())
+                mad = float(np.median(np.abs(numeric_values - numeric_median))) if numeric_values.size else 0.0
+                robust_outlier_count = 0
+                if mad > 0.0:
+                    robust_outlier_count = int(np.sum(np.abs(numeric_values - numeric_median) / (1.4826 * mad) > 3.5))
+                zscore_outlier_count = 0
+                if numeric_std > 0.0:
+                    zscore_outlier_count = int(np.sum(np.abs((numeric_values - numeric_mean) / numeric_std) > 3.0))
                 numeric_columns_profile.append({
                     'column': str(column),
                     'count': int(numeric_series.count()),
-                    'mean': round(float(numeric_series.mean()), 4),
-                    'std': round(float(numeric_series.std(ddof=0)), 4) if numeric_series.count() > 1 else 0.0,
+                    'mean': round(numeric_mean, 4),
+                    'std': round(numeric_std, 4),
                     'min': round(float(numeric_series.min()), 4),
                     'q1': round(q1, 4),
-                    'median': round(float(numeric_series.median()), 4),
+                    'median': round(numeric_median, 4),
                     'q3': round(q3, 4),
                     'max': round(float(numeric_series.max()), 4),
                     'outlier_count': outlier_count,
+                    'robust_outlier_count': robust_outlier_count,
+                    'zscore_outlier_count': zscore_outlier_count,
                 })
+                statistics[str(column)] = {
+                    'min': round(float(numeric_series.min()), 4),
+                    'max': round(float(numeric_series.max()), 4),
+                    'mean': round(numeric_mean, 4),
+                    'median': round(numeric_median, 4),
+                }
+
+                biological_rules = [
+                    ('creatinine', 0.0, 200.0, 'invalid_value'),
+                    ('potassium', 2.5, 6.5, 'biological_outlier'),
+                    ('sodium', 125.0, 155.0, 'biological_outlier'),
+                    ('age', 0.0, 120.0, 'invalid_value'),
+                    ('hemoglobine', 7.0, 20.0, 'biological_outlier'),
+                    ('albumine', 25.0, 55.0, 'biological_outlier'),
+                    ('uree', 0.0, 100.0, 'biological_outlier'),
+                ]
+                for token, low_bound, high_bound, anomaly_type in biological_rules:
+                    if token not in normalized_column:
+                        continue
+                    invalid_mask = (numeric_series < low_bound) | (numeric_series > high_bound)
+                    if invalid_mask.any():
+                        for row_index, value in numeric_series[invalid_mask].head(12).items():
+                            anomaly_records.append({
+                                'row': int(row_index) + 1,
+                                'column': str(column),
+                                'value': _to_json_compatible(value),
+                                'type': anomaly_type,
+                                'score': anomaly_score(str(column), value, anomaly_type),
+                            })
         else:
             top_values = non_null_series.astype(str).value_counts().head(5)
             categorical_columns_profile.append({
@@ -1445,6 +1552,105 @@ def _build_technical_profile(dataframe):
                     for index, count in top_values.items()
                 ],
             })
+
+            numeric_like_tokens = ['creatinine', 'potassium', 'sodium', 'age', 'hemoglobine', 'albumine', 'uree']
+            if any(token in normalized_column for token in numeric_like_tokens):
+                for row_index, value in series.items():
+                    if pd.isna(value):
+                        continue
+                    value_text = str(value).strip()
+                    if not value_text:
+                        continue
+                    try:
+                        float(value_text.replace(',', '.'))
+                        continue
+                    except Exception:
+                        anomaly_records.append({
+                            'row': int(row_index) + 1,
+                            'column': str(column),
+                            'value': _to_json_compatible(value),
+                            'type': 'invalid_value',
+                            'score': anomaly_score(str(column), value, 'invalid_value'),
+                        })
+                        if str(column) not in suspect_columns:
+                            suspect_columns.append(str(column))
+                        break
+
+    sklearn_anomaly_count = 0
+    sklearn_anomaly_ratio = 0.0
+    if IsolationForest is not None and SimpleImputer is not None and len(numeric_matrix_columns) >= 2 and total_rows >= 8:
+        try:
+            numeric_frame = dataframe[numeric_matrix_columns].apply(pd.to_numeric, errors='coerce')
+            if numeric_frame.notna().any().any():
+                imputer = SimpleImputer(strategy='median')
+                matrix = imputer.fit_transform(numeric_frame)
+                if matrix.size:
+                    forest = IsolationForest(random_state=42, contamination='auto', n_estimators=100)
+                    labels = forest.fit_predict(matrix)
+                    sklearn_anomaly_count = int((labels == -1).sum())
+                    sklearn_anomaly_ratio = round((sklearn_anomaly_count / len(labels)) * 100, 2) if len(labels) else 0.0
+        except Exception:
+            sklearn_anomaly_count = 0
+            sklearn_anomaly_ratio = 0.0
+
+    anomalies_by_severity = {
+        'critical': [],
+        'high': [],
+        'medium': [],
+        'low': [],
+    }
+    column_stats = {}
+    for record in anomaly_records:
+        score = int(record.get('score') or 0)
+        if score >= 10:
+            bucket = 'critical'
+        elif score >= 7:
+            bucket = 'high'
+        elif score >= 4:
+            bucket = 'medium'
+        else:
+            bucket = 'low'
+        anomalies_by_severity[bucket].append(record)
+
+        column_name = str(record.get('column') or '')
+        if not column_name:
+            continue
+        column_stats.setdefault(column_name, {
+            'error_rate': 0.0,
+            'max': statistics.get(column_name, {}).get('max'),
+            'min': statistics.get(column_name, {}).get('min'),
+            'anomalies': 0,
+            'score_total': 0,
+        })
+        column_stats[column_name]['anomalies'] += 1
+        column_stats[column_name]['score_total'] += score
+
+    for column_name, stats in column_stats.items():
+        stats['error_rate'] = round((stats['anomalies'] / total_rows), 4) if total_rows else 0.0
+        if stats.get('score_total') is not None:
+            stats['avg_score'] = round((stats['score_total'] / stats['anomalies']), 2) if stats['anomalies'] else 0.0
+
+    suspect_column_stats = sorted(
+        (
+            {
+                'name': column_name,
+                'error_rate': stats.get('error_rate', 0.0),
+                'anomalies': stats.get('anomalies', 0),
+            }
+            for column_name, stats in column_stats.items()
+        ),
+        key=lambda item: (item.get('error_rate') or 0.0, item.get('anomalies') or 0),
+        reverse=True,
+    )
+    suspect_column_stats = suspect_column_stats[:20]
+
+    critical_anomalies = sorted(anomalies_by_severity['critical'], key=lambda item: int(item.get('score') or 0), reverse=True)
+    high_anomalies = sorted(anomalies_by_severity['high'], key=lambda item: int(item.get('score') or 0), reverse=True)
+    medium_anomalies = sorted(anomalies_by_severity['medium'], key=lambda item: int(item.get('score') or 0), reverse=True)
+    low_anomalies = sorted(anomalies_by_severity['low'], key=lambda item: int(item.get('score') or 0), reverse=True)
+
+    if suspect_column_stats:
+        suspect_columns = [item['name'] for item in suspect_column_stats[:10]]
 
     return {
         'rows': total_rows,
@@ -1458,7 +1664,691 @@ def _build_technical_profile(dataframe):
         'columns_profile': columns_profile,
         'numeric_columns_profile': numeric_columns_profile,
         'categorical_columns_profile': categorical_columns_profile,
+        'sklearn_anomaly_count': sklearn_anomaly_count,
+        'sklearn_anomaly_ratio': sklearn_anomaly_ratio,
+        'suspect_columns': list(dict.fromkeys([str(column) for column in suspect_columns if column])),
+        'column_stats': column_stats,
+        'anomalies': anomalies_by_severity,
+        'critical_anomalies': critical_anomalies[:100],
+        'high_anomalies': high_anomalies[:100],
+        'medium_anomalies': medium_anomalies[:100],
+        'low_anomalies': low_anomalies[:100],
+        'missing_data_rate': missing_data_rate,
+        'statistics': statistics,
+        'analysis_stack': {
+            'deterministic': ['pandas', 'numpy'],
+            'statistical_ml': ['sklearn'] if IsolationForest is not None and SimpleImputer is not None else [],
+        },
         'preview_rows': _dataframe_to_rows(dataframe.head(3)),
+    }
+
+
+def _build_rule_validation_summary(technical_profile):
+    issues = []
+    recommendations = []
+
+    missing_pct = float(technical_profile.get('missing_pct') or 0.0)
+    duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
+    sklearn_anomaly_count = int(technical_profile.get('sklearn_anomaly_count') or 0)
+    outlier_total = sum(int(item.get('outlier_count') or 0) for item in (technical_profile.get('numeric_columns_profile') or []))
+
+    critical_threshold = 15.0
+    for column_meta in technical_profile.get('columns_profile', []):
+        column_name = str(column_meta.get('column') or '')
+        if not column_name:
+            continue
+        column_missing_pct = float(column_meta.get('missing_pct') or 0.0)
+        normalized = normalize_header(column_name)
+        if any(token in normalized for token in ['deces', 'dialyse', 'biologie', 'albumine', 'hemoglobine', 'creatinine', 'phosphore', 'calcium', 'infection', 'transplant']):
+            if column_missing_pct >= critical_threshold:
+                issues.append({
+                    'severity': 'warning',
+                    'rule': 'critical_column_missingness',
+                    'column': column_name,
+                    'explanation': f'Colonne critique avec {round(column_missing_pct, 2)}% de valeurs manquantes.',
+                })
+                recommendations.append(f'Contrôler la cohérence clinique de {column_name} avant export.')
+
+    if missing_pct > 0:
+        issues.append({
+            'severity': 'warning',
+            'rule': 'global_missingness',
+            'column': '*',
+            'explanation': f'Taux global de valeurs manquantes: {round(missing_pct, 2)}%.',
+        })
+        recommendations.append('Appliquer une stratégie d imputation explicable sur les colonnes concernées.')
+
+    if duplicate_rows > 0:
+        issues.append({
+            'severity': 'warning',
+            'rule': 'duplicates',
+            'column': '*',
+            'explanation': f'{duplicate_rows} ligne(s) dupliquée(s) détectée(s).',
+        })
+        recommendations.append('Dédoublonner les lignes avant intégration médicale.')
+
+    if outlier_total > 0 or sklearn_anomaly_count > 0:
+        issues.append({
+            'severity': 'info',
+            'rule': 'statistical_anomalies',
+            'column': '*',
+            'explanation': f'{outlier_total} outlier(s) IQR et {sklearn_anomaly_count} anomalie(s) sklearn détecté(s).',
+        })
+        recommendations.append('Faire valider les extrêmes numériques par une expertise clinique.')
+
+    if not issues:
+        recommendations.append('Profil statistique cohérent: aucune règle métier bloquante détectée.')
+
+    return {
+        'status': 'pass' if not issues else 'review',
+        'issues': issues[:12],
+        'recommendations': list(dict.fromkeys(recommendations))[:8],
+        'summary': 'Validation règles métier et profilage statistique terminés.',
+        'signals': {
+            'missing_pct': missing_pct,
+            'duplicate_rows': duplicate_rows,
+            'outlier_total': outlier_total,
+            'sklearn_anomaly_count': sklearn_anomaly_count,
+        },
+    }
+
+
+def _build_compact_llm_summary(dataframe, technical_profile):
+    missing_pct = float(technical_profile.get('missing_pct') or 0.0)
+    duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
+    anomalies = technical_profile.get('anomalies') or {}
+    column_stats = technical_profile.get('column_stats') or {}
+    rule_validation = _build_rule_validation_summary(technical_profile)
+
+    critical_selected = list(anomalies.get('critical') or [])[:10]
+    high_selected = list(anomalies.get('high') or [])[:5]
+    suspect_columns = sorted(
+        (
+            {
+                'name': column_name,
+                'error_rate': float(stats.get('error_rate') or 0.0),
+                'anomalies': int(stats.get('anomalies') or 0),
+            }
+            for column_name, stats in column_stats.items()
+        ),
+        key=lambda item: (item.get('error_rate') or 0.0, item.get('anomalies') or 0),
+        reverse=True,
+    )[:3]
+
+    total_anomalies = sum(len(items or []) for items in anomalies.values())
+    quality_score = max(0, min(100, int(round(100 - (missing_pct * 0.5) - (duplicate_rows * 2) - min(total_anomalies, 20)))))
+
+    return {
+        'dataset_quality_score': quality_score,
+        'critical_anomalies': critical_selected,
+        'high_anomalies': high_selected,
+        'suspect_columns': suspect_columns,
+        'missing_data_rate': {str(key): float(value) for key, value in list((technical_profile.get('missing_data_rate') or {}).items())[:40]},
+        'statistics': {str(key): value for key, value in list((technical_profile.get('statistics') or {}).items())[:40]},
+        'rule_validation': rule_validation,
+        'technical_profile': {
+            'rows': int(technical_profile.get('rows') or len(dataframe.index)),
+            'columns': int(technical_profile.get('columns') or len(dataframe.columns)),
+            'missing_cells': int(technical_profile.get('missing_cells') or 0),
+            'missing_pct': missing_pct,
+            'duplicate_rows': duplicate_rows,
+            'duplicate_pct': float(technical_profile.get('duplicate_pct') or 0.0),
+        },
+        'global_stats': {
+            'rows': int(technical_profile.get('rows') or len(dataframe.index)),
+            'anomalies': total_anomalies,
+        },
+        'rag': {},
+    }
+
+
+MAX_ANOMALIES = 15
+MAX_COLUMNS = 5
+REQUIRED_PREPROCESS_KEYS = ['critical_anomalies', 'high_anomalies', 'suspect_columns', 'dataset_quality_score']
+PIPELINE_VERSION = os.environ.get('PREPROCESS_PIPELINE_VERSION', '2026.05.18-v2')
+SCHEMA_GUARD_VERSION = 'v1'
+LLM_FILTER_VERSION = 'v2'
+ALLOWED_MEDICAL_COLUMNS = {
+    'creatinine',
+    'creatinine_basale',
+    'potassium',
+    'potassium_basale',
+    'sodium',
+    'sodium_basale',
+    'hemoglobine',
+    'hemoglobine_basale',
+    'albumine',
+    'albumine_basale',
+    'phosphore',
+    'phosphore_basale',
+    'calcium',
+    'calcium_basale',
+    'uree',
+    'uree_basale',
+    'dfg',
+    'dfg_basale',
+    'age',
+    'age_annees',
+    'creatininemie',
+    'kaliemie',
+}
+
+MEDICAL_COLUMN_ALIASES = {
+    'creatinine_basale': 'creatinine',
+    'creatininemie': 'creatinine',
+    'creatinine': 'creatinine',
+    'potassium_basale': 'potassium',
+    'potassium_basal': 'potassium',
+    'kaliemie': 'potassium',
+    'sodium_basale': 'sodium',
+    'sodium_basal': 'sodium',
+    'hemoglobine_basale': 'hemoglobine',
+    'albumine_basale': 'albumine',
+    'phosphore_basale': 'phosphore',
+    'calcium_basale': 'calcium',
+    'uree_basale': 'uree',
+    'dfg_basale': 'dfg',
+    'age_annees': 'age',
+}
+
+
+def estimate_size(data):
+    return len(str(data))
+
+
+def _extract_payload_column_name(column_entry):
+    if isinstance(column_entry, dict):
+        for key in ('column', 'col', 'name', 'field', 'label'):
+            value = column_entry.get(key)
+            if value not in [None, '']:
+                return str(value).strip()
+        return ''
+    return str(column_entry or '').strip()
+
+
+def _normalize_medical_column_name(column_name):
+    normalized = normalize_header(column_name)
+    return MEDICAL_COLUMN_ALIASES.get(normalized, normalized)
+
+
+def _normalize_preprocess_payload_columns(payload):
+    payload = dict(payload or {})
+
+    for key in ('critical_anomalies', 'high_anomalies'):
+        normalized_items = []
+        for item in list(payload.get(key) or []):
+            if not isinstance(item, dict):
+                normalized_items.append(item)
+                continue
+
+            anomaly = dict(item)
+            raw_column = _extract_payload_column_name(anomaly)
+            if raw_column:
+                canonical_column = _normalize_medical_column_name(raw_column)
+                if canonical_column != raw_column:
+                    anomaly.setdefault('raw_column', raw_column)
+                anomaly['column'] = canonical_column
+            normalized_items.append(anomaly)
+        payload[key] = normalized_items
+
+    normalized_suspect_columns = []
+    seen_columns = set()
+    for item in list(payload.get('suspect_columns') or []):
+        if isinstance(item, dict):
+            suspect_column = dict(item)
+            raw_column = _extract_payload_column_name(suspect_column)
+            if raw_column:
+                canonical_column = _normalize_medical_column_name(raw_column)
+                if canonical_column != raw_column:
+                    suspect_column.setdefault('raw_column', raw_column)
+                suspect_column['name'] = canonical_column
+                suspect_column['column'] = canonical_column
+                seen_key = canonical_column
+            else:
+                seen_key = str(suspect_column)
+            if seen_key in seen_columns:
+                continue
+            seen_columns.add(seen_key)
+            normalized_suspect_columns.append(suspect_column)
+            continue
+
+        raw_column = _extract_payload_column_name(item)
+        if not raw_column:
+            continue
+        canonical_column = _normalize_medical_column_name(raw_column)
+        if canonical_column in seen_columns:
+            continue
+        seen_columns.add(canonical_column)
+        normalized_suspect_columns.append(canonical_column)
+
+    payload['suspect_columns'] = normalized_suspect_columns
+    return payload
+
+
+def _reduce_preprocess_payload_more(payload):
+    payload = dict(payload or {})
+    payload['critical_anomalies'] = list(payload.get('critical_anomalies') or [])[:10]
+    payload['high_anomalies'] = list(payload.get('high_anomalies') or [])[:5]
+    payload['suspect_columns'] = list(payload.get('suspect_columns') or [])[:3]
+    payload['missing_data_rate'] = dict(list((payload.get('missing_data_rate') or {}).items())[:15])
+    payload['statistics'] = dict(list((payload.get('statistics') or {}).items())[:15])
+    payload['rule_validation'] = {
+        'status': (payload.get('rule_validation') or {}).get('status'),
+        'summary': (payload.get('rule_validation') or {}).get('summary'),
+        'issues': list((payload.get('rule_validation') or {}).get('issues') or [])[:5],
+        'recommendations': list((payload.get('rule_validation') or {}).get('recommendations') or [])[:5],
+    }
+    payload['rag'] = {
+        'chunk_count': int((payload.get('rag') or {}).get('chunk_count') or 0),
+        'retrieved_chunks_count': int((payload.get('rag') or {}).get('retrieved_chunks_count') or 0),
+        'section_fusion': list((payload.get('rag') or {}).get('section_fusion') or [])[:5],
+        'retrieved_chunks': list((payload.get('rag') or {}).get('retrieved_chunks') or [])[:3],
+    }
+    payload['technical_profile'] = {
+        'rows': (payload.get('technical_profile') or {}).get('rows'),
+        'columns': (payload.get('technical_profile') or {}).get('columns'),
+        'missing_cells': (payload.get('technical_profile') or {}).get('missing_cells'),
+        'missing_pct': (payload.get('technical_profile') or {}).get('missing_pct'),
+        'duplicate_rows': (payload.get('technical_profile') or {}).get('duplicate_rows'),
+        'duplicate_pct': (payload.get('technical_profile') or {}).get('duplicate_pct'),
+        'columns_profile': list((payload.get('technical_profile') or {}).get('columns_profile') or [])[:MAX_COLUMNS],
+        'numeric_columns_profile': list((payload.get('technical_profile') or {}).get('numeric_columns_profile') or [])[:MAX_COLUMNS],
+        'categorical_columns_profile': list((payload.get('technical_profile') or {}).get('categorical_columns_profile') or [])[:MAX_COLUMNS],
+    }
+    payload['global_stats'] = {
+        'rows': (payload.get('global_stats') or {}).get('rows'),
+        'anomalies': (payload.get('global_stats') or {}).get('anomalies'),
+    }
+    return payload
+
+
+def _prepare_preprocess_llm_payload(payload):
+    payload = dict(payload or {})
+    payload = _normalize_preprocess_payload_columns(payload)
+    payload_size_before = estimate_size(payload)
+    payload['critical_anomalies'] = list(payload.get('critical_anomalies') or [])[:10]
+    payload['high_anomalies'] = list(payload.get('high_anomalies') or [])[:5]
+    payload['suspect_columns'] = list(payload.get('suspect_columns') or [])[:3]
+
+    def _collect_llm_candidate_columns(source_payload):
+        source_payload = source_payload if isinstance(source_payload, dict) else {}
+        candidates = set()
+        for anomaly in list(source_payload.get('critical_anomalies') or []) + list(source_payload.get('high_anomalies') or []):
+            if isinstance(anomaly, dict):
+                column_name = _extract_payload_column_name(anomaly)
+                if column_name:
+                    candidates.add(normalize_header(column_name))
+        for column_name in list(source_payload.get('suspect_columns') or []):
+            extracted = _extract_payload_column_name(column_name)
+            if extracted:
+                candidates.add(normalize_header(extracted))
+        for column_name in (source_payload.get('missing_data_rate') or {}).keys():
+            candidates.add(normalize_header(column_name))
+        for column_name in (source_payload.get('statistics') or {}).keys():
+            candidates.add(normalize_header(column_name))
+        return candidates
+
+    # Build an LLM-safe reduced view to avoid sending technical/noise columns
+    LLM_INCLUDE_TOKENS = {
+        'creatinine', 'potassium', 'sodium', 'hemoglobine', 'albumine', 'uree', 'dfg', 'age',
+        'phosphore', 'calcium', 'gfr', 'outcome', 'mortality', 'deces', 'dialyse', 'transplant'
+    }
+    LLM_EXCLUDE_TOKENS = {'id', 'uuid', 'row', 'index', 'file', 'filename', 'checksum', 'technical', 'flag', 'is_valid'}
+
+    def _is_llm_column(name):
+        norm = normalize_header(str(name))
+        if any(tok in norm for tok in LLM_EXCLUDE_TOKENS):
+            return False
+        # include if matches known clinical tokens or medical aliases
+        if norm in MEDICAL_COLUMN_ALIASES:
+            return True
+        return any(tok in norm for tok in LLM_INCLUDE_TOKENS)
+
+    llm_safe = {}
+    # keep same top-level small lists but filtered
+    llm_safe['critical_anomalies'] = [a for a in payload.get('critical_anomalies') or [] if _is_llm_column(a.get('column') or '')][:MAX_ANOMALIES]
+    llm_safe['high_anomalies'] = [a for a in payload.get('high_anomalies') or [] if _is_llm_column(a.get('column') or '')][:5]
+    llm_safe['suspect_columns'] = [c for c in payload.get('suspect_columns') or [] if _is_llm_column(c if isinstance(c, str) else (c.get('column') or c.get('name') or ''))][:MAX_COLUMNS]
+
+    # filter missing_data_rate and statistics to llm columns
+    missing = payload.get('missing_data_rate') or {}
+    stats = payload.get('statistics') or {}
+    llm_safe['missing_data_rate'] = {k: v for k, v in (missing.items() if isinstance(missing, dict) else []) if _is_llm_column(k)}
+    llm_safe['statistics'] = {k: v for k, v in (stats.items() if isinstance(stats, dict) else []) if _is_llm_column(k)}
+
+    # keep a compact technical_profile for context but not full columns
+    tp = payload.get('technical_profile') or {}
+    llm_safe['technical_profile'] = {
+        'rows': tp.get('rows'),
+        'columns': tp.get('columns'),
+        'missing_pct': tp.get('missing_pct'),
+    }
+
+    llm_candidates = _collect_llm_candidate_columns(payload)
+    llm_kept_candidates = set()
+    for anomaly in list(llm_safe.get('critical_anomalies') or []) + list(llm_safe.get('high_anomalies') or []):
+        if isinstance(anomaly, dict):
+            column_name = _extract_payload_column_name(anomaly)
+            if column_name:
+                llm_kept_candidates.add(normalize_header(column_name))
+    for column_name in list(llm_safe.get('suspect_columns') or []):
+        extracted = _extract_payload_column_name(column_name)
+        if extracted:
+            llm_kept_candidates.add(normalize_header(extracted))
+    for column_name in (llm_safe.get('missing_data_rate') or {}).keys():
+        llm_kept_candidates.add(normalize_header(column_name))
+    for column_name in (llm_safe.get('statistics') or {}).keys():
+        llm_kept_candidates.add(normalize_header(column_name))
+
+    llm_filter_ratio = 0.0
+    if llm_candidates:
+        llm_filter_ratio = round(1.0 - (len(llm_kept_candidates) / float(len(llm_candidates))), 3)
+        llm_filter_ratio = max(0.0, min(1.0, llm_filter_ratio))
+
+    # attach the reduced view while keeping full payload for pandas consumers
+    payload['llm_safe'] = llm_safe
+    payload['llm_filter_ratio'] = llm_filter_ratio
+    payload['reduction_applied'] = False
+
+    logger.info('Preprocess LLM-safe payload prepared', extra={
+        'llm_filter_ratio': llm_filter_ratio,
+        'llm_candidates_count': len(llm_candidates),
+        'llm_kept_candidates_count': len(llm_kept_candidates),
+    })
+
+    if estimate_size(payload) > 6000:
+        payload = _reduce_preprocess_payload_more(payload)
+        payload['reduction_applied'] = True
+
+    payload['critical_anomalies'] = list(payload.get('critical_anomalies') or [])[:MAX_ANOMALIES]
+    payload['high_anomalies'] = list(payload.get('high_anomalies') or [])[:5]
+    payload['suspect_columns'] = list(payload.get('suspect_columns') or [])[:3]
+
+    assert len(payload.get('critical_anomalies') or []) <= MAX_ANOMALIES
+    assert len(payload.get('suspect_columns') or []) <= MAX_COLUMNS
+
+    payload['audit'] = {
+        'payload_size_before': payload_size_before,
+        'payload_size_after': estimate_size(payload),
+        'reduction_applied': bool(payload.get('reduction_applied')),
+    }
+
+    logger.info('Preprocess payload prepared', extra={
+        'payload_size': estimate_size(payload),
+        'critical_count': len(payload.get('critical_anomalies') or []),
+        'suspect_count': len(payload.get('suspect_columns') or []),
+        'llm_filter_ratio': payload.get('llm_filter_ratio', 0.0),
+        'payload_stage': 'prepared_before_validation',
+    })
+    return payload
+
+
+def validate_payload_schema_only(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Payload invalide: dictionnaire attendu.')
+
+    for key in REQUIRED_PREPROCESS_KEYS:
+        if key not in payload:
+            raise ValueError(f'Payload invalide: cle manquante {key}.')
+
+    if not isinstance(payload.get('critical_anomalies'), list) or not isinstance(payload.get('high_anomalies'), list):
+        raise ValueError('Payload invalide: listes attendues pour les anomalies.')
+    if not isinstance(payload.get('suspect_columns'), list):
+        raise ValueError('Payload invalide: liste attendue pour les colonnes suspectes.')
+
+    dataset_quality_score = payload.get('dataset_quality_score')
+    if not isinstance(dataset_quality_score, (int, float)) or dataset_quality_score < 0:
+        raise ValueError('Invalid dataset score')
+
+    return True
+
+
+def validate_preprocess_payload_consistency(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Payload invalide: dictionnaire attendu pour le controle final.')
+
+    validate_payload_schema_only(payload)
+
+    llm_safe = payload.get('llm_safe')
+    if not isinstance(llm_safe, dict):
+        raise ValueError('Payload invalide: vue llm_safe manquante.')
+
+    for key in ('critical_anomalies', 'high_anomalies', 'suspect_columns', 'technical_profile'):
+        if key not in llm_safe:
+            raise ValueError(f'Payload invalide: cle llm_safe manquante {key}.')
+
+    if not isinstance(payload.get('llm_filter_ratio'), (int, float)):
+        raise ValueError('Payload invalide: ratio de filtrage llm invalide.')
+
+    llm_safe_size = estimate_size(llm_safe)
+    if llm_safe_size > 12000:
+        raise ValueError('Payload invalide: taille llm_safe trop elevee apres reduction.')
+
+    return True
+
+
+def _build_preprocess_audit_event(session_id, stage, payload, technical_profile, validation_mode='dataset_first', model=None, schema_pass=True, dataset_pass=True, error=None):
+    payload = payload if isinstance(payload, dict) else {}
+    technical_profile = technical_profile if isinstance(technical_profile, dict) else {}
+    audit_meta = payload.get('audit') if isinstance(payload.get('audit'), dict) else {}
+    payload_size_before = audit_meta.get('payload_size_before')
+    payload_size_after = audit_meta.get('payload_size_after')
+    if not isinstance(payload_size_before, int):
+        payload_size_before = estimate_size(payload)
+    if not isinstance(payload_size_after, int):
+        payload_size_after = estimate_size(payload)
+
+    event = {
+        'session_id': session_id,
+        'patient_id': payload.get('id_patient') or technical_profile.get('id_patient') or session_id,
+        'pipeline_version': PIPELINE_VERSION,
+        'stage': stage,
+        'schema_pass': bool(schema_pass),
+        'dataset_pass': bool(dataset_pass),
+        'llm_safe_ratio': round(float(payload.get('llm_filter_ratio') or 0.0), 3),
+        'reduction_applied': bool(payload.get('reduction_applied') or audit_meta.get('reduction_applied')),
+        'payload_size_before': int(payload_size_before),
+        'payload_size_after': int(payload_size_after),
+        'validation_mode': validation_mode,
+        'model': model,
+        'decision': 'fallback' if error is not None else 'llm',
+        'fallback_used': bool(error is not None),
+        'pipeline': {
+            'version': PIPELINE_VERSION,
+            'schema_version': SCHEMA_GUARD_VERSION,
+            'llm_filter_version': LLM_FILTER_VERSION,
+            'validation_mode_version': 'v1',
+        },
+    }
+    if error is not None:
+        event['error'] = str(error)
+    logger.info('PREPROCESS_AUDIT %s', json.dumps(event, ensure_ascii=False, default=str))
+    return event
+
+
+def replay_preprocess_pipeline(audit_event, progress_callback=None, force_mode='replay'):
+    audit_event = audit_event if isinstance(audit_event, dict) else {}
+    session_id = audit_event.get('session_id') or audit_event.get('preprocess_id') or audit_event.get('patient_id')
+    if not session_id:
+        raise ValueError('Audit invalide: session_id manquant pour le replay.')
+
+    session = _load_preprocess_session(session_id)
+    if isinstance(session, dict) and session.get('report'):
+        report = dict(session.get('report') or {})
+        report['replayed_from_audit'] = True
+        report['replay_mode'] = force_mode
+        report['replay_source'] = {
+            'session_id': session_id,
+            'pipeline_version': audit_event.get('pipeline_version') or report.get('pipeline', {}).get('version') or PIPELINE_VERSION,
+            'decision': audit_event.get('decision') or ('fallback' if audit_event.get('fallback_used') else 'llm'),
+            'fallback_used': bool(audit_event.get('fallback_used')),
+        }
+        return report
+
+    input_snapshot = audit_event.get('input_snapshot') if isinstance(audit_event.get('input_snapshot'), dict) else {}
+    original_rows = input_snapshot.get('original_rows') if isinstance(input_snapshot.get('original_rows'), list) else []
+    columns = input_snapshot.get('columns') if isinstance(input_snapshot.get('columns'), list) else []
+    dataframe = _rows_to_dataframe(original_rows, columns=columns)
+    technical_profile = input_snapshot.get('technical_profile') if isinstance(input_snapshot.get('technical_profile'), dict) else _build_technical_profile(dataframe)
+
+    if audit_event.get('fallback_used'):
+        return _build_deterministic_analysis_fallback(
+            dataframe,
+            technical_profile,
+            'Replay from audit event: fallback-used snapshot.',
+        )
+
+    return _call_ollama_qwen_analysis(
+        dataframe,
+        technical_profile,
+        session_id=session_id,
+        progress_callback=progress_callback,
+    )
+
+
+def validate_payload(payload, technical_profile=None, validation_mode='dataset_first'):
+    if not isinstance(payload, dict):
+        raise ValueError('Payload invalide: dictionnaire attendu.')
+
+    validate_payload_schema_only(payload)
+
+    validation_mode = str(validation_mode or 'dataset_first').lower()
+    if validation_mode not in {'dataset_first', 'soft', 'strict'}:
+        validation_mode = 'dataset_first'
+
+    normalized_payload = _normalize_preprocess_payload_columns(payload)
+    payload.clear()
+    payload.update(normalized_payload)
+    technical_profile = technical_profile if isinstance(technical_profile, dict) else {}
+    # Dataset-first: only enforce column-name membership when metadata explicitly
+    # provides a dataset column list. If metadata is absent, do not infer it from
+    # the payload because that can create a false source of truth.
+    tp_columns = technical_profile.get('column_names') if isinstance(technical_profile.get('column_names'), (list, tuple)) else None
+    known_columns = None
+    if tp_columns:
+        known_columns = {
+            normalize_header(str(column))
+            for column in tp_columns
+            if column is not None and str(column).strip()
+        }
+
+    critical_anomalies = payload.get('critical_anomalies') or []
+    suspect_columns = payload.get('suspect_columns') or []
+
+    if not isinstance(critical_anomalies, list) or not isinstance(suspect_columns, list):
+        raise ValueError('Payload invalide: listes attendues pour anomalies et colonnes suspectes.')
+
+    unknown_columns = []
+
+    for anomaly in critical_anomalies:
+        if not isinstance(anomaly, dict):
+            raise ValueError('Payload invalide: anomalie critique non structuree.')
+        column_name = _extract_payload_column_name(anomaly)
+        if not column_name:
+            raise ValueError('Payload invalide: colonne d anomalie manquante.')
+        normalized_column = _normalize_medical_column_name(column_name)
+        anomaly['column'] = normalized_column
+        # If metadata exists, log mismatches but never block validation.
+        if validation_mode == 'strict' and known_columns is not None and normalized_column not in known_columns and normalized_column not in unknown_columns:
+            unknown_columns.append(normalized_column)
+        if 'value' not in anomaly:
+            raise ValueError('Payload invalide: valeur d anomalie manquante.')
+        value = anomaly.get('value')
+        if isinstance(value, (dict, list, set, tuple)):
+            raise ValueError('Payload invalide: valeur d anomalie mal typee.')
+
+    for column_name in suspect_columns:
+        normalized_column = _extract_payload_column_name(column_name)
+        if not normalized_column:
+            raise ValueError('Payload invalide: colonne suspecte manquante.')
+        normalized_column = _normalize_medical_column_name(normalized_column)
+        # Same logic for suspect columns: metadata can warn, but cannot reject.
+        if validation_mode == 'strict' and known_columns is not None and normalized_column not in known_columns and normalized_column not in unknown_columns:
+            unknown_columns.append(normalized_column)
+
+    if unknown_columns:
+        logger.info('Payload preprocess: columns not present in metadata allowed under dataset-first mode', extra={
+            'schema_pass': True,
+            'dataset_pass': True,
+            'validation_mode': validation_mode,
+            'unknown_columns_count': len(dict.fromkeys(unknown_columns)),
+        })
+        logger.warning('Payload preprocess: colonnes medicales non reconnues conservees', extra={
+            'columns': list(dict.fromkeys(unknown_columns)),
+        })
+    else:
+        logger.info('Payload preprocess validation completed', extra={
+            'schema_pass': True,
+            'dataset_pass': True,
+            'validation_mode': validation_mode,
+            'unknown_columns_count': 0,
+        })
+
+    if len(critical_anomalies) > MAX_ANOMALIES:
+        raise ValueError('Payload invalide: trop danomalies critiques.')
+    if len(suspect_columns) > MAX_COLUMNS:
+        raise ValueError('Payload invalide: trop de colonnes suspectes.')
+
+    return True
+
+
+def _compute_final_confidence(technical_profile, issues=None, compact_summary=None):
+    technical_profile = technical_profile if isinstance(technical_profile, dict) else {}
+    issues = issues if isinstance(issues, list) else []
+    compact_summary = compact_summary if isinstance(compact_summary, dict) else {}
+
+    confidence = 1.0
+    missing_pct = float(technical_profile.get('missing_pct') or 0.0)
+    duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
+    anomaly_total = len(compact_summary.get('critical_anomalies') or []) + len(compact_summary.get('high_anomalies') or [])
+    severity_count = {'critical': 0, 'warning': 0, 'info': 0}
+
+    for item in issues:
+        severity = str((item or {}).get('severity', 'info')).lower()
+        if severity in severity_count:
+            severity_count[severity] += 1
+
+    if anomaly_total > 20:
+        confidence -= 0.25
+    elif anomaly_total > 10:
+        confidence -= 0.15
+    elif anomaly_total > 0:
+        confidence -= 0.05
+
+    if missing_pct > 30:
+        confidence -= 0.30
+    elif missing_pct > 15:
+        confidence -= 0.20
+    elif missing_pct > 5:
+        confidence -= 0.10
+
+    if duplicate_rows > 0:
+        confidence -= min(0.10, duplicate_rows * 0.01)
+
+    confidence -= min(0.25, severity_count['critical'] * 0.08)
+    confidence -= min(0.10, severity_count['warning'] * 0.03)
+
+    confidence = max(0.0, min(1.0, round(confidence, 2)))
+    if confidence >= 0.85:
+        label = 'elevee'
+    elif confidence >= 0.65:
+        label = 'bonne'
+    elif confidence >= 0.45:
+        label = 'moderee'
+    else:
+        label = 'faible'
+
+    return {
+        'confidence_score': confidence,
+        'confidence_pct': int(round(confidence * 100)),
+        'confidence_label': label,
+        'signals': {
+            'missing_pct': missing_pct,
+            'duplicate_rows': duplicate_rows,
+            'anomaly_total': anomaly_total,
+            'critical_issues': severity_count['critical'],
+            'warning_issues': severity_count['warning'],
+        },
     }
 
 
@@ -1470,7 +2360,7 @@ def _get_section_prefix_for_column(column_name):
     return 'generic_data'
 
 
-def _build_preprocess_chunks(dataframe, technical_profile, max_rows_per_chunk=40):
+def _build_preprocess_chunks(dataframe, technical_profile, max_rows_per_chunk=20):
     chunks = []
     columns = [str(column) for column in dataframe.columns.tolist()]
     grouped_columns = {}
@@ -1610,8 +2500,17 @@ def _repair_json_text(response_text):
         normalized_candidate = candidate.strip()
         repaired_candidates.append(normalized_candidate)
         repaired_candidates.append(re.sub(r',\s*([}\]])', r'\1', normalized_candidate))
+        repaired_candidates.append(normalized_candidate.replace('“', '"').replace('”', '"').replace('’', "'").replace('`', '"'))
 
+    permissive_candidates = []
     for candidate in repaired_candidates:
+        compact_candidate = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]+', ' ', candidate)
+        permissive_candidates.append(compact_candidate)
+        permissive_candidates.append(re.sub(r'\bNone\b', 'null', compact_candidate))
+        permissive_candidates.append(re.sub(r'\bTrue\b', 'true', compact_candidate))
+        permissive_candidates.append(re.sub(r'\bFalse\b', 'false', compact_candidate))
+
+    for candidate in repaired_candidates + permissive_candidates:
         try:
             parsed = json.loads(candidate)
             if isinstance(parsed, dict):
@@ -1619,12 +2518,57 @@ def _repair_json_text(response_text):
         except Exception:
             continue
 
+    try:
+        import ast
+
+        for candidate in permissive_candidates:
+            try:
+                parsed = ast.literal_eval(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                continue
+    except Exception:
+        pass
+
     return None
+
+
+def _repair_llm_text(value):
+    if isinstance(value, dict):
+        return {str(key): _repair_llm_text(item) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [_repair_llm_text(item) for item in value]
+
+    if not isinstance(value, str):
+        return value
+
+    text = value
+    if not text:
+        return text
+
+    mojibake_candidates = [text]
+    for source_encoding in ('latin1', 'cp1252', 'cp437', 'cp850', 'iso-8859-1'):
+        try:
+            repaired = text.encode(source_encoding).decode('utf-8')
+        except Exception:
+            continue
+        if repaired not in mojibake_candidates:
+            mojibake_candidates.append(repaired)
+
+    suspicious_markers = '├┤╡╢╖╕╣║╗╝▒■�ÃÂ'
+
+    def _score(candidate):
+        return sum(1 for character in candidate if character in suspicious_markers)
+
+    best_candidate = min(mojibake_candidates, key=_score)
+    return best_candidate
 
 
 def _parse_llm_analysis_response(raw_response):
     if isinstance(raw_response, dict):
-        return raw_response
+        return _repair_llm_text(raw_response)
 
     response_text = str(raw_response or '').strip()
     if not response_text:
@@ -1640,17 +2584,17 @@ def _parse_llm_analysis_response(raw_response):
 
     parsed = _repair_json_text(response_text)
     if parsed is not None:
-        return parsed
+        return _repair_llm_text(parsed)
 
     # Dernier recours: tenter de récupérer uniquement la première structure JSON fermée.
     extracted = _extract_balanced_json_candidate(response_text)
     if extracted:
         parsed = _repair_json_text(extracted)
         if parsed is not None:
-            return parsed
+            return _repair_llm_text(parsed)
 
     return {
-        'summary': response_text[:1200],
+        'summary': _repair_llm_text(response_text[:1200]),
         'issues': [],
         'recommendations': [],
         'correction_plan': {},
@@ -1661,72 +2605,7 @@ def _parse_llm_analysis_response(raw_response):
 
 
 def _build_llm_payload(dataframe, technical_profile):
-    max_preview_rows = int(os.environ.get('OLLAMA_PREVIEW_ROWS', '3'))
-    max_column_samples = int(os.environ.get('OLLAMA_COLUMN_SAMPLES', '1'))
-    max_columns = int(os.environ.get('OLLAMA_MAX_COLUMNS', '40'))
-    max_value_chars = int(os.environ.get('OLLAMA_MAX_VALUE_CHARS', '50'))
-
-    def _llm_compact_value(value):
-        normalized = _to_json_compatible(value)
-        if isinstance(normalized, str) and len(normalized) > max_value_chars:
-            return normalized[:max_value_chars] + '...'
-        return normalized
-
-    selected_columns = [str(column) for column in list(dataframe.columns)[:max_columns]]
-    selected_df = dataframe[selected_columns] if selected_columns else dataframe
-
-    preview_rows = _dataframe_to_rows(selected_df.head(max_preview_rows))
-    for row in preview_rows:
-        if isinstance(row, dict):
-            for key in list(row.keys()):
-                row[key] = _llm_compact_value(row.get(key))
-
-    column_samples = {
-        str(column): [
-            _llm_compact_value(value)
-            for value in selected_df[column].dropna().head(max_column_samples).tolist()
-        ]
-        for column in selected_df.columns
-    }
-
-    compact_columns_profile = []
-    for column_meta in technical_profile.get('columns_profile', []):
-        column_name = str(column_meta.get('name', ''))
-        if column_name not in selected_columns:
-            continue
-        compact_columns_profile.append({
-            'name': column_name,
-            'dtype': column_meta.get('dtype'),
-            'missing_count': column_meta.get('missing_count'),
-            'missing_ratio': column_meta.get('missing_ratio'),
-            'unique_values': column_meta.get('unique_values'),
-        })
-
-    compact_profile = {
-        'rows': technical_profile.get('rows'),
-        'columns': technical_profile.get('columns'),
-        'missing_cells': technical_profile.get('missing_cells'),
-        'missing_pct': technical_profile.get('missing_pct'),
-        'duplicate_rows': technical_profile.get('duplicate_rows'),
-        'duplicate_pct': technical_profile.get('duplicate_pct'),
-        'columns_profile': compact_columns_profile,
-        'numeric_columns_profile': technical_profile.get('numeric_columns_profile', [])[:12],
-        'categorical_columns_profile': technical_profile.get('categorical_columns_profile', [])[:12],
-        'preview_rows': technical_profile.get('preview_rows', [])[:max_preview_rows],
-    }
-
-    return {
-        'pack_type': 'structured_analysis_pack',
-        'technical_profile': compact_profile,
-        'preview_rows': preview_rows,
-        'column_samples': column_samples,
-        'meta': {
-            'selected_columns_count': len(selected_columns),
-            'total_columns_count': int(len(dataframe.columns)),
-            'preview_rows_count': len(preview_rows),
-            'column_samples_per_column': max_column_samples,
-        },
-    }
+    return _build_compact_llm_summary(dataframe, technical_profile)
 
 
 def _shrink_llm_payload(payload, max_columns=20, max_preview_rows=2, max_samples_per_column=1):
@@ -1773,68 +2652,19 @@ def _shrink_llm_payload(payload, max_columns=20, max_preview_rows=2, max_samples
     return shrunk
 
 
-def _get_ollama_candidate_bases():
-    configured_base = str(os.environ.get('OLLAMA_BASE_URL', '') or os.environ.get('OLLAMA_URL', '')).rstrip('/')
-    fallback_base = str(os.environ.get('OLLAMA_FALLBACK_URL', '')).rstrip('/')
-    running_in_docker = os.path.exists('/.dockerenv')
-    default_base = 'http://ollama:11434' if running_in_docker else 'http://127.0.0.1:11434'
-
-    candidate_bases = []
-    for base in [configured_base, fallback_base, default_base]:
-        normalized_base = str(base).rstrip('/')
-        if normalized_base and normalized_base not in candidate_bases:
-            candidate_bases.append(normalized_base)
-    return candidate_bases
-
-
 def _check_ollama_health(timeout_seconds=8):
-    endpoint_errors = []
-    for ollama_base in _get_ollama_candidate_bases():
-        ollama_endpoint = f'{ollama_base}/api/tags'
-        req = urllib_request.Request(ollama_endpoint, method='GET')
-        try:
-            with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
-                body = response.read().decode('utf-8')
-            payload = json.loads(body)
-            models = payload.get('models') if isinstance(payload, dict) else []
-            model_names = []
-            if isinstance(models, list):
-                model_names = [item.get('name') for item in models if isinstance(item, dict) and item.get('name')]
-            return {
-                'connected': True,
-                'base_url': ollama_base,
-                'endpoint': ollama_endpoint,
-                'models_count': len(model_names),
-                'models': model_names[:20],
-                'errors': [],
-            }
-        except urllib_error.HTTPError as error:
-            error_body = ''
-            try:
-                error_body = error.read().decode('utf-8')
-            except Exception:
-                error_body = ''
-            endpoint_errors.append(f'{ollama_endpoint} -> HTTP {error.code}: {error_body or str(error)}')
-        except (urllib_error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as error:
-            endpoint_errors.append(f'{ollama_endpoint} -> {error}')
-
-    return {
-        'connected': False,
-        'base_url': None,
-        'endpoint': None,
-        'models_count': 0,
-        'models': [],
-        'errors': endpoint_errors,
-    }
+    return check_llm_health(timeout_seconds=timeout_seconds)
 
 
 def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_message):
     rows_count = int(len(dataframe.index))
     issues = []
     recommendations = []
+    rule_validation = _build_rule_validation_summary(technical_profile)
 
     missing_pct = float(technical_profile.get('missing_pct') or 0.0)
     duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
+    sklearn_anomaly_count = int(technical_profile.get('sklearn_anomaly_count') or 0)
 
     if missing_pct > 0:
         issues.append({
@@ -1869,6 +2699,16 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
         })
         recommendations.append('Examiner les valeurs numeriques extremes avant validation clinique.')
 
+    if sklearn_anomaly_count > 0:
+        issues.append({
+            'severity': 'info',
+            'category': 'sklearn_anomalies',
+            'column': '*',
+            'rows': sklearn_anomaly_count,
+            'explanation': f'{sklearn_anomaly_count} anomalie(s) detectee(s) par IsolationForest.',
+        })
+        recommendations.append('Comparer les anomalies IsolationForest avec le contexte clinique.')
+
     fill_missing = {}
     trim_columns = []
     parse_dates = []
@@ -1900,11 +2740,14 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
     if not recommendations:
         recommendations.append('Dataset globalement stable selon les controles deterministes locaux.')
 
+    recommendations.extend(rule_validation.get('recommendations') or [])
+    recommendations = list(dict.fromkeys(recommendations))
+
     quality_score = max(5, min(100, int(round(100 - (missing_pct * 0.5) - (duplicate_rows * 2) - min(outlier_total, 20)))))
 
     return {
         'quality_score': quality_score,
-        'summary': 'Analyse realisee via fallback deterministe local (Pandas) suite a indisponibilite LLM.',
+        'summary': 'Analyse realisee via profilage local (pandas/numpy/sklearn) et validation des regles metier suite a indisponibilite LLM.',
         'issues': issues[:6],
         'recommendations': recommendations[:5],
         'correction_plan': correction_plan,
@@ -1914,6 +2757,7 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
             'LLM indisponible: fallback deterministe applique.',
             reason_message,
         ],
+        'rule_validation': rule_validation,
         'analysis_pack': {
             'pack_type': 'structured_analysis_pack',
             'technical_profile': technical_profile,
@@ -1926,20 +2770,21 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
                 'column_samples_per_column': 0,
             },
         },
+        'compact_summary': _build_compact_llm_summary(dataframe, technical_profile),
         'model_used': 'deterministic_fallback',
         'attempt': 'fallback_local',
         'stage': 'pass1_diagnostic',
         'second_pass': {'status': 'skipped_fallback'},
-        'route': {'mode': 'deterministic', 'label': 'deterministic_only', 'reason': reason_message},
+        'route': {'mode': 'analytics_rules', 'label': 'deterministic_profiling_rules', 'reason': reason_message},
         'pipeline': {
-            'stage': 'deterministic_only',
+            'stage': 'profiling_and_rules',
             'chunks_count': technical_profile.get('chunk_count', 0),
             'retrieval': 'skipped',
         },
     }
 
 
-def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=None):
+def _call_ollama_qwen_analysis(dataframe, technical_profile, session_id=None, progress_callback=None):
     route = _determine_preprocess_route(technical_profile)
     chunks = _build_preprocess_chunks(dataframe, technical_profile)
     retrieval_context = _build_retrieval_context(
@@ -1954,43 +2799,153 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     technical_profile['chunks'] = retrieval_context.get('chunk_summaries', [])
     technical_profile['retrieved_chunks'] = retrieval_context.get('retrieved_chunks', [])
 
-    if route.get('mode') == 'deterministic':
-        deterministic_result = _build_deterministic_analysis_fallback(
-            dataframe,
-            technical_profile,
-            route.get('reason', 'Dataset simple: pas de LLM necessaire.'),
-        )
-        deterministic_result['route'] = route
-        deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
-        deterministic_result['rag_context'] = retrieval_context
-        return deterministic_result
-
-    model_name = route.get('primary_model') or os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct'))
-    timeout_seconds = int(os.environ.get('OLLAMA_TIMEOUT_SECONDS', '420'))
-    primary_timeout_seconds = int(route.get('primary_timeout_seconds') or int(os.environ.get('OLLAMA_PRIMARY_TIMEOUT_SECONDS', str(min(timeout_seconds, 180)))))
-    fallback_model = route.get('fallback_model') or os.environ.get('OLLAMA_FALLBACK_MODEL', 'qwen2.5:3b-instruct')
-    fallback_timeout_seconds = int(route.get('fallback_timeout_seconds') or int(os.environ.get('OLLAMA_FALLBACK_TIMEOUT_SECONDS', str(timeout_seconds))))
-    retry_max_columns = int(os.environ.get('OLLAMA_RETRY_MAX_COLUMNS', '20'))
-    retry_preview_rows = int(os.environ.get('OLLAMA_RETRY_PREVIEW_ROWS', '2'))
-    retry_num_predict = int(route.get('fallback_num_predict') or os.environ.get('OLLAMA_RETRY_NUM_PREDICT', '24'))
-    pass2_num_predict = int(os.environ.get('OLLAMA_PASS2_NUM_PREDICT', str(retry_num_predict)))
-    candidate_bases = _get_ollama_candidate_bases()
+    model_name = route.get('primary_model') or get_llm_model_name()
+    timeout_seconds = int(os.environ.get('LLM_TIMEOUT_SECONDS', os.environ.get('OLLAMA_TIMEOUT_SECONDS', '300')))
+    primary_timeout_seconds = int(
+        route.get('primary_timeout_seconds')
+        or os.environ.get('LLM_PRIMARY_TIMEOUT_SECONDS', os.environ.get('OLLAMA_PRIMARY_TIMEOUT_SECONDS', str(min(timeout_seconds, 180))))
+    )
+    primary_timeout_seconds = min(primary_timeout_seconds, 240)
+    fallback_timeout_seconds = int(
+        route.get('fallback_timeout_seconds')
+        or os.environ.get('LLM_FALLBACK_TIMEOUT_SECONDS', os.environ.get('OLLAMA_FALLBACK_TIMEOUT_SECONDS', str(min(timeout_seconds, 300))))
+    )
+    fallback_timeout_seconds = min(fallback_timeout_seconds, 300)
+    retry_max_columns = int(os.environ.get('LLM_RETRY_MAX_COLUMNS', os.environ.get('OLLAMA_RETRY_MAX_COLUMNS', '20')))
+    retry_preview_rows = int(os.environ.get('LLM_RETRY_PREVIEW_ROWS', os.environ.get('OLLAMA_RETRY_PREVIEW_ROWS', '2')))
+    pass1_num_predict = int(os.environ.get('LLM_PASS1_MAX_TOKENS', os.environ.get('OLLAMA_PASS1_NUM_PREDICT', os.environ.get('OLLAMA_NUM_PREDICT', '8192'))))
+    pass2_num_predict = int(os.environ.get('LLM_PASS2_MAX_TOKENS', os.environ.get('OLLAMA_PASS2_NUM_PREDICT', os.environ.get('OLLAMA_NUM_PREDICT', '16384'))))
+    retry_num_predict = int(os.environ.get('LLM_RETRY_MAX_TOKENS', os.environ.get('OLLAMA_RETRY_NUM_PREDICT', str(pass2_num_predict))))
+    pass1_num_predict = min(pass1_num_predict, 512)
+    pass2_num_predict = min(pass2_num_predict, 768)
+    retry_num_predict = min(retry_num_predict, 768)
 
     prompt_payload = _build_llm_payload(dataframe, technical_profile)
     prompt_payload['rag'] = {
         'chunk_count': len(chunks),
-        'retrieved_chunks': retrieval_context.get('retrieved_chunks', []),
+        'retrieved_chunks': [
+            {
+                'chunk_id': chunk.get('chunk_id'),
+                'section': chunk.get('section'),
+                'kind': chunk.get('kind'),
+                'row_count': chunk.get('row_count'),
+                'column_count': chunk.get('column_count'),
+                'missing_pct': chunk.get('missing_pct'),
+                'duplicate_rows': chunk.get('duplicate_rows'),
+                'critical_signals': chunk.get('critical_signals', [])[:6],
+                'deterministic_summary': chunk.get('deterministic_summary'),
+            }
+            for chunk in retrieval_context.get('retrieved_chunks', [])
+            if isinstance(chunk, dict)
+        ],
         'retrieved_chunks_count': retrieval_context.get('retrieved_chunks_count', 0),
-        'section_fusion': retrieval_context.get('section_fusion', []),
+        'section_fusion': [
+            item if isinstance(item, str) else json.dumps(item, ensure_ascii=False, default=str)
+            for item in (retrieval_context.get('section_fusion', []) or [])[:20]
+        ],
         'vector_store': retrieval_context.get('vector_store', {}),
     }
-    fallback_payload = _shrink_llm_payload(
+    prompt_payload = _prepare_preprocess_llm_payload(prompt_payload)
+    fallback_payload = prompt_payload
+
+    if not should_use_llm(technical_profile, prompt_payload):
+        audit_event = _build_preprocess_audit_event(
+            session_id,
+            'llm_sla_gate',
+            prompt_payload,
+            technical_profile,
+            validation_mode='deterministic_first',
+            model=model_name,
+            schema_pass=True,
+            dataset_pass=True,
+            error='LLM SLA threshold reached',
+        )
+        deterministic_result = _build_deterministic_analysis_fallback(
+            dataframe,
+            technical_profile,
+            'LLM SLA gate: payload trop lourd pour un appel LLM fiable.',
+        )
+        deterministic_result['audit_log'] = [audit_event]
+        deterministic_result['route'] = {
+            'mode': 'deterministic_first',
+            'label': 'deterministic_first_sla',
+            'reason': 'LLM SLA gate reached before LLM call.',
+        }
+        return deterministic_result
+
+    logger.info('Preprocess payload validation stage', extra={
+        'payload_stage': 'after_reduce_before_final_guard',
+        'payload_size': estimate_size(prompt_payload),
+        'has_llm_safe': 'llm_safe' in prompt_payload,
+        'llm_filter_ratio': prompt_payload.get('llm_filter_ratio', 0.0),
+        'reduction_applied': bool(prompt_payload.get('reduction_applied')),
+    })
+    try:
+        validate_preprocess_payload_consistency(prompt_payload)
+    except Exception as error:
+        audit_event = _build_preprocess_audit_event(
+            session_id,
+            'final_guard',
+            prompt_payload,
+            technical_profile,
+            validation_mode='final_consistency_guard',
+            model=model_name,
+            schema_pass=True,
+            dataset_pass=False,
+            error=error,
+        )
+        logger.warning('Preprocess payload final consistency check failed, using deterministic fallback', extra={
+            'error': str(error),
+            'payload_size': estimate_size(prompt_payload),
+            'payload_stage': 'final_consistency_guard_failed',
+        })
+        deterministic_result = _build_deterministic_analysis_fallback(dataframe, technical_profile, f'Final consistency check failed: {error}')
+        deterministic_result['limitations'] = list(dict.fromkeys([
+            'Final consistency guard failed: payload llm_safe trop volumineux ou incomplet.',
+            f'Final consistency check failed: {error}',
+        ] + (deterministic_result.get('limitations') if isinstance(deterministic_result.get('limitations'), list) else [])))
+        deterministic_result['audit_log'] = [audit_event]
+        return deterministic_result
+    try:
+        validate_payload(prompt_payload, technical_profile=technical_profile)
+    except Exception as error:
+        audit_event = _build_preprocess_audit_event(
+            session_id,
+            'final_guard',
+            prompt_payload,
+            technical_profile,
+            validation_mode='dataset_first',
+            model=model_name,
+            schema_pass=True,
+            dataset_pass=False,
+            error=error,
+        )
+        logger.warning('Payload validation failed, using deterministic fallback', extra={
+            'error': str(error),
+            'payload_size': estimate_size(prompt_payload),
+            'payload_stage': 'validation_failed_before_llm',
+        })
+        deterministic_result = _build_deterministic_analysis_fallback(dataframe, technical_profile, f'Payload validation failed: {error}')
+        deterministic_result['audit_log'] = [audit_event]
+        return deterministic_result
+
+    audit_event = _build_preprocess_audit_event(
+        session_id,
+        'final_guard',
         prompt_payload,
-        max_columns=retry_max_columns,
-        max_preview_rows=retry_preview_rows,
-        max_samples_per_column=1,
+        technical_profile,
+        validation_mode='dataset_first',
+        model=model_name,
+        schema_pass=True,
+        dataset_pass=True,
     )
 
+    logger.info('Preprocess payload validated before LLM', extra={
+        'payload_stage': 'after_validate_payload',
+        'payload_size': estimate_size(prompt_payload),
+        'llm_filter_ratio': prompt_payload.get('llm_filter_ratio', 0.0),
+        'reduction_applied': bool(prompt_payload.get('reduction_applied')),
+    })
     def _notify_progress(message):
         if callable(progress_callback):
             try:
@@ -1999,23 +2954,25 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
                 pass
 
     def _build_pass1_prompt(payload_for_prompt):
+        llm_input = payload_for_prompt.get('llm_safe') if isinstance(payload_for_prompt, dict) and 'llm_safe' in payload_for_prompt else payload_for_prompt
         return (
-            'Analyse la qualite de ce dataset medical et retourne STRICTEMENT un JSON valide (sans texte hors JSON). '
-            'Schema attendu: '
-            '{quality_score:number(0-100), summary:string, issues:[{severity,category,column,rows,explanation}], '
-            'recommendations:[string], needs_correction_plan:boolean, limitations:[string]}. '
-            'Contraintes: max 6 issues, max 5 recommendations, explications courtes. '
-            'Contexte: ' + json.dumps(payload_for_prompt, ensure_ascii=False, default=str)
+            'Tu es un expert nephrologue. Analyse uniquement ce JSON. '
+            'Taches : detecter erreurs de saisie, verifier coherence biologique, evaluer gravite medicale, juger fiabilite du dataset, produire rapport structure. '
+            'Important : ne pas inventer de donnees, ne pas demander plus d informations, se baser uniquement sur le JSON. '
+            'Retourne STRICTEMENT un JSON valide, sans texte autour. '
+            'Format obligatoire: {"résumé_global":string,"anomalies_critiques":[],"erreurs_de_saisie_probables":[],"incoherences_biologiques":[],"colonnes_suspectes":[],"conclusion_medicale":string}. '
+            'JSON d entree: ' + json.dumps(llm_input, ensure_ascii=False, default=str)
         )
 
     def _build_pass2_prompt(payload_for_prompt):
+        llm_input = payload_for_prompt.get('llm_safe') if isinstance(payload_for_prompt, dict) and 'llm_safe' in payload_for_prompt else payload_for_prompt
         return (
-            'Tu es dans la passe 2. Retourne STRICTEMENT un JSON valide (sans texte hors JSON). '
-            'Objectif: proposer un plan de correction deterministe et minimal a appliquer par Pandas. '
-            'Schema attendu: '
-            '{correction_plan:{rename_columns,drop_columns,value_mappings,fill_missing,type_casts,parse_dates,trim_whitespace_columns,default_values}, limitations:[string]}. '
-            'Contraintes: max 20 operations au total, actions prudentes, aucune invention de colonnes absentes. '
-            'Contexte: ' + json.dumps(payload_for_prompt, ensure_ascii=False, default=str)
+            'Tu es un expert nephrologue en correction de dataset medical. Analyse uniquement ce JSON. '
+            'Taches : detecter erreurs de saisie, verifier coherence biologique, evaluer gravite medicale, juger fiabilite du dataset, produire rapport structure. '
+            'Important : ne pas inventer de donnees, ne pas demander plus d informations, se baser uniquement sur le JSON. '
+            'Retourne STRICTEMENT un JSON valide, sans texte hors JSON. '
+            'Format obligatoire: {"correction_plan":{"outlier_corrections":[],"biological_rules":[],"fill_missing":{},"parse_dates":[],"rename_columns":{},"type_casts":{}},"corrected_preview_rows":[],"recommendations":[],"issues_found":[],"clinical_interpretation":string,"nephrology_consistency":string}. '
+            'Le JSON d entree est: ' + json.dumps(llm_input, ensure_ascii=False, default=str)
         )
 
     def _run_stage(stage_name, primary_prompt, fallback_prompt, primary_pack, fallback_pack, primary_predict, fallback_predict):
@@ -2030,79 +2987,65 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             }
         ]
 
-        if fallback_model and fallback_model != model_name:
-            attempts.append(
-                {
-                    'label': 'fallback',
-                    'model': fallback_model,
-                    'timeout_seconds': fallback_timeout_seconds,
-                    'num_predict': fallback_predict,
-                    'analysis_pack': fallback_pack,
-                    'prompt': fallback_prompt,
-                }
-            )
-
         stage_errors = []
+        system_prompt = get_system_prompt()
         for attempt in attempts:
-            request_payload = {
-                'model': attempt['model'],
-                'prompt': attempt['prompt'],
-                'stream': False,
-                'format': 'json',
-                'options': {
-                    'temperature': 0.1,
-                    'num_predict': attempt['num_predict'],
+            messages = [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': attempt['prompt']},
+            ]
+            print(f"[LLM] start stage={stage_name} attempt={attempt['label']} model={attempt['model']}")
+            logger.info(
+                'Preprocess LLM call start',
+                extra={
+                    'stage': stage_name,
+                    'attempt': attempt['label'],
+                    'model': attempt['model'],
+                    'timeout_seconds': attempt['timeout_seconds'],
+                    'max_tokens': attempt['num_predict'],
                 },
-            }
-            request_data = json.dumps(request_payload).encode('utf-8')
-
-            for ollama_base in candidate_bases:
-                ollama_endpoint = f'{ollama_base}/api/generate'
-                req = urllib_request.Request(
-                    ollama_endpoint,
-                    data=request_data,
-                    headers={'Content-Type': 'application/json'},
-                    method='POST',
+            )
+            try:
+                result = run_json_completion(
+                    messages,
+                    model=attempt['model'],
+                    max_tokens=attempt['num_predict'],
+                    timeout_seconds=attempt['timeout_seconds'],
                 )
-
-                try:
-                    with urllib_request.urlopen(req, timeout=attempt['timeout_seconds']) as response:
-                        body = response.read().decode('utf-8')
-                    payload = json.loads(body)
-                    raw_response = payload.get('response', '{}')
-                    parsed_response = _parse_llm_analysis_response(raw_response)
-                    parsed_response['analysis_pack'] = attempt['analysis_pack']
-                    parsed_response['model_used'] = attempt['model']
-                    parsed_response['attempt'] = attempt['label']
-                    parsed_response['stage'] = stage_name
-                    return parsed_response
-                except urllib_error.HTTPError as error:
-                    error_body = ''
-                    try:
-                        error_body = error.read().decode('utf-8')
-                    except Exception:
-                        error_body = ''
-                    stage_errors.append(
-                        f"[{stage_name}:{attempt['label']}:{attempt['model']}] {ollama_endpoint} -> HTTP {error.code}: {error_body or str(error)}"
-                    )
-                except (urllib_error.URLError, RemoteDisconnected, ConnectionError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as error:
-                    stage_errors.append(
-                        f"[{stage_name}:{attempt['label']}:{attempt['model']}] {ollama_endpoint} -> {error}"
-                    )
+                raw_response = result.get('content')
+                parsed_response = _parse_llm_analysis_response(raw_response)
+                parsed_response['analysis_pack'] = attempt['analysis_pack']
+                parsed_response['model_used'] = result.get('model_used') or attempt['model']
+                parsed_response['attempt'] = attempt['label']
+                parsed_response['stage'] = stage_name
+                return parsed_response
+            except Exception as error:
+                logger.warning(
+                    'Preprocess LLM call failed',
+                    extra={
+                        'stage': stage_name,
+                        'attempt': attempt['label'],
+                        'model': attempt['model'],
+                        'error': str(error),
+                    },
+                )
+                stage_errors.append(
+                    f"[{stage_name}:{attempt['label']}:{attempt['model']}] LLM error: {error}"
+                )
 
         error_summary = '; '.join(stage_errors) if stage_errors else 'Aucune reponse recue'
         lower_errors = error_summary.lower()
         limitations = []
         if 'timed out' in lower_errors or 'timeout' in lower_errors:
             limitations.append(
-                f'Delai depasse: Ollama n a pas repondu dans la fenetre configured (primary={primary_timeout_seconds}s, fallback={fallback_timeout_seconds}s, plafond={timeout_seconds}s).'
+                f'Delai depasse: le moteur LLM n a pas repondu dans la fenetre configured (primary={primary_timeout_seconds}s, fallback={fallback_timeout_seconds}s, plafond={timeout_seconds}s).'
             )
         if 'connection refused' in lower_errors or 'errno 111' in lower_errors:
             limitations.append(
-                'Connexion refusee: l URL Ollama ciblee n est pas joignable depuis le backend. Verifier OLLAMA_URL et le reseau Docker.'
+                'Connexion refusee: l URL LLM ciblee n est pas joignable depuis le backend. Verifier la configuration VLLM/LITELLM et le reseau Docker.'
             )
         if '405' in lower_errors or 'method not allowed' in lower_errors:
-            limitations.append('Methode invalide detectee: /api/generate doit etre appele en POST.')
+            limitations.append('Methode invalide detectee: endpoint LLM incompatible (verifier /v1/chat/completions).')
         if not limitations:
             limitations.append('Aucun diagnostic automatique supplementaire disponible.')
 
@@ -2110,7 +3053,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'unavailable': True,
             'summary': f'Analyse LLM indisponible ({stage_name}): {error_summary}',
             'issues': [],
-            'recommendations': [],
+            'recommendations': ['Verifier la connexion au moteur LLM et reessayer'],
             'correction_plan': {},
             'corrected_preview_rows': [],
             'column_assessment': [],
@@ -2118,6 +3061,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'analysis_pack': primary_pack,
             'model_used': model_name,
             'stage': stage_name,
+            'needs_correction_plan': True,
         }
 
     _notify_progress('Analyse LLM - passe 1/2 (diagnostic)...')
@@ -2127,7 +3071,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         fallback_prompt=_build_pass1_prompt(fallback_payload),
         primary_pack=prompt_payload,
         fallback_pack=fallback_payload,
-        primary_predict=int(os.environ.get('OLLAMA_NUM_PREDICT', '32')),
+        primary_predict=pass1_num_predict,
         fallback_predict=retry_num_predict,
     )
 
@@ -2139,13 +3083,15 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         )
         deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
         deterministic_result['rag_context'] = retrieval_context
+        deterministic_result['audit_log'] = [audit_event]
         return deterministic_result
 
     pass1_issues = pass1_result.get('issues') if isinstance(pass1_result.get('issues'), list) else []
     pass1_recommendations = pass1_result.get('recommendations') if isinstance(pass1_result.get('recommendations'), list) else []
     pass1_limitations = pass1_result.get('limitations') if isinstance(pass1_result.get('limitations'), list) else []
 
-    needs_correction_plan = bool(pass1_result.get('needs_correction_plan')) or bool(pass1_issues)
+    # FORCER l'exécution de la passe 2 - MODIFICATION ICI
+    needs_correction_plan = True  # Toujours exécuter la passe 2
 
     if not needs_correction_plan:
         pass1_result['correction_plan'] = pass1_result.get('correction_plan') if isinstance(pass1_result.get('correction_plan'), dict) else {}
@@ -2165,11 +3111,12 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     _notify_progress('Analyse LLM - passe 2/2 (plan de correction)...')
     pass2_primary_payload = {
         'analysis_pack': prompt_payload,
-        'diagnostic': {
-            'quality_score': pass1_result.get('quality_score'),
-            'summary': pass1_result.get('summary'),
-            'issues': pass1_issues[:6],
-            'recommendations': pass1_recommendations[:5],
+    'rag_context': retrieval_context, 
+    'diagnostic': {
+        'quality_score': pass1_result.get('quality_score'),
+        'summary': pass1_result.get('summary'),
+        'issues': pass1_issues[:6],
+        'recommendations': pass1_recommendations[:5]
         },
     }
     pass2_fallback_payload = {
@@ -2210,6 +3157,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'retrieval': retrieval_context.get('retrieval_policy'),
             'vector_store': retrieval_context.get('vector_store', {}),
         },
+        'audit_log': [audit_event],
     }
 
     if pass2_result.get('unavailable'):
@@ -2221,6 +3169,24 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'model_used': pass2_result.get('model_used'),
             'attempt': pass2_result.get('attempt'),
         }
+        # Ajouter un plan de correction par défaut
+        final_result['correction_plan'] = {
+            'fill_missing': {},
+            'parse_dates': ['date_debut_dialyse', 'date_naissance'],
+            'outlier_corrections': [
+                {'column': 'hemoglobine_basale', 'lower_bound': 5, 'upper_bound': 20},
+                {'column': 'creatinine_basale', 'lower_bound': 50, 'upper_bound': 500},
+                {'column': 'albumine_basale', 'lower_bound': 15, 'upper_bound': 60},
+                {'column': 'potassium_basale', 'lower_bound': 2.5, 'upper_bound': 7.0},
+            ]
+        }
+        if not final_result.get('recommendations'):
+            final_result['recommendations'] = [
+                "Nettoyer les valeurs aberrantes biologiques",
+                "Standardiser les formats de date",
+                "Imputer les valeurs manquantes par médiane/mode"
+            ]
+        final_result['audit_log'] = [audit_event]
         return final_result
 
     correction_plan = pass2_result.get('correction_plan') if isinstance(pass2_result.get('correction_plan'), dict) else {}
@@ -2428,15 +3394,57 @@ def _build_preprocess_report(dataframe, technical_profile, llm_analysis=None, co
             recommendations.append(recommendation_text)
 
     if not recommendations:
-        recommendations.append('Aucune recommandation fournie par le modele.')
+        if issues:
+            for issue in issues[:5]:
+                category = str(issue.get('category') or '').lower()
+                column_name = str(issue.get('column') or '*')
+                if category == 'missing_values':
+                    recommendations.append(f'Completer ou imputer les valeurs manquantes pour {column_name}.')
+                elif category == 'duplicates':
+                    recommendations.append(f'Dedoublonner les lignes concernees autour de {column_name}.')
+                elif category == 'outliers':
+                    recommendations.append(f'Verifier les valeurs extremes detectees dans {column_name}.')
+                else:
+                    recommendations.append(f'Reviser manuellement le point de controle signale sur {column_name}.')
+        if not recommendations:
+            recommendations = [
+                'Verifier la qualite globale du dataset.',
+                'Controler les colonnes critiques avant integration.',
+                'Appliquer une normalisation et une validation metier avant import.',
+            ]
 
     corrected_preview_rows = _dataframe_to_rows(corrected_df.head(20))
+    compact_summary = llm_analysis.get('compact_summary') if isinstance(llm_analysis, dict) else {}
+    compact_summary = compact_summary if isinstance(compact_summary, dict) else {}
+    final_confidence = _compute_final_confidence(technical_profile, issues=issues, compact_summary=compact_summary)
+    suspect_columns = compact_summary.get('suspect_columns') or technical_profile.get('suspect_columns') or []
+    critical_anomalies = compact_summary.get('critical_anomalies') or technical_profile.get('critical_anomalies') or []
+    high_anomalies = compact_summary.get('high_anomalies') or technical_profile.get('high_anomalies') or []
+    medical_report = {
+        'resume_global': llm_analysis.get('summary') if isinstance(llm_analysis, dict) else '',
+        'anomalies_critiques': critical_anomalies[:20],
+        'erreurs_de_saisie_probables': [
+            item for item in critical_anomalies[:20]
+            if str(item.get('type') or '').lower() == 'invalid_value'
+        ],
+        'incoherences_biologiques': [
+            item for item in critical_anomalies[:20]
+            if str(item.get('type') or '').lower() != 'invalid_value'
+        ],
+        'colonnes_suspectes': list(dict.fromkeys([str(column) for column in suspect_columns if column]))[:20],
+        'conclusion_medicale': llm_analysis.get('conclusion_medicale') if isinstance(llm_analysis, dict) else '',
+        'high_anomalies': high_anomalies[:10],
+        'score_confiance': final_confidence,
+    }
 
     return {
         'summary': {
             'rows': int(len(dataframe.index)),
             'columns': int(len(dataframe.columns)),
             'quality_score': quality_score,
+            'confidence_score': final_confidence['confidence_score'],
+            'confidence_pct': final_confidence['confidence_pct'],
+            'confidence_label': final_confidence['confidence_label'],
             'total_issues': len(issues),
             'severity_count': severity_count,
             'corrected_rows': int(len(corrected_df.index)),
@@ -2451,6 +3459,7 @@ def _build_preprocess_report(dataframe, technical_profile, llm_analysis=None, co
         'corrected_preview_rows': corrected_preview_rows,
         'llm_preview_rows': llm_analysis.get('corrected_preview_rows') if isinstance(llm_analysis, dict) else [],
         'analysis_pack': llm_analysis.get('analysis_pack') if isinstance(llm_analysis, dict) else None,
+        'medical_report': medical_report,
     }
 
 
@@ -2891,13 +3900,13 @@ class PatientPreprocessStatusView(APIView):
 
 
 class PatientPreprocessHealthView(APIView):
-    # Allow unauthenticated access so the UI can display Ollama status before login
+    # Allow unauthenticated access so the UI can display LLM status before login
     permission_classes = [AllowAny]
 
     def get(self, request):
-        timeout_seconds = int(os.environ.get('OLLAMA_HEALTH_TIMEOUT_SECONDS', '8'))
+        timeout_seconds = int(os.environ.get('LLM_HEALTH_TIMEOUT_SECONDS', os.environ.get('OLLAMA_HEALTH_TIMEOUT_SECONDS', '8')))
         health = _check_ollama_health(timeout_seconds=timeout_seconds)
-        model_name = os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct')
+        model_name = get_llm_model_name()
         if health.get('connected'):
             return Response(
                 {
@@ -2907,7 +3916,7 @@ class PatientPreprocessHealthView(APIView):
                     'endpoint': health.get('endpoint'),
                     'models_count': health.get('models_count', 0),
                     'models': health.get('models', []),
-                    'message': 'Ollama connecté.',
+                    'message': 'Moteur LLM connecté.',
                 },
                 status=status.HTTP_200_OK,
             )
@@ -2921,7 +3930,7 @@ class PatientPreprocessHealthView(APIView):
                 'endpoint': None,
                 'models_count': 0,
                 'models': [],
-                'message': 'Ollama indisponible depuis le backend.',
+                'message': 'Moteur LLM indisponible depuis le backend.',
                 'errors': errors,
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -2944,6 +3953,34 @@ class PatientPreprocessSessionView(APIView):
                 'row_count': len(session.get('corrected_rows', [])),
                 'preview_rows': session.get('corrected_rows', [])[:50],
                 'change_log': session.get('change_log', [])[-20:],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PatientPreprocessReplayView(APIView):
+    permission_classes = [CanViewPatients]
+
+    def post(self, request, session_id):
+        session = _load_preprocess_session(session_id)
+        if not session:
+            return Response({'error': 'Session de pretraitement introuvable.'}, status=status.HTTP_404_NOT_FOUND)
+
+        audit_event = request.data.get('audit_event')
+        if not isinstance(audit_event, dict):
+            audit_log = session.get('report', {}).get('audit_log') if isinstance(session.get('report'), dict) else []
+            audit_event = audit_log[0] if isinstance(audit_log, list) and audit_log else {'session_id': session_id}
+
+        try:
+            replayed_report = replay_preprocess_pipeline(audit_event)
+        except Exception as error:
+            return Response({'error': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'preprocess_id': session_id,
+                'replayed': True,
+                'report': replayed_report,
             },
             status=status.HTTP_200_OK,
         )
