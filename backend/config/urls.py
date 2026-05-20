@@ -24,4 +24,3 @@ urlpatterns = [
     path('api/audit/', include('audit.urls')),
     path('api/predictions/', include('predictions.urls')),
 ]
-

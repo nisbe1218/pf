@@ -1,11 +1,22 @@
 import json
 import os
 import uuid
-import logging
 from celery import shared_task
 from django.utils import timezone
-
-logger = logging.getLogger(__name__)
+from .views import (
+    _load_preprocess_session,
+    _read_uploaded_dataframe,
+    _build_technical_profile,
+    _determine_preprocess_route,
+    _call_ollama_qwen_analysis,
+    _build_preprocess_chunks,
+    _build_retrieval_context,
+    _apply_llm_correction_plan,
+    _build_preprocess_report,
+    _dataframe_to_rows,
+    _save_preprocess_session,
+    resolve_entry_user_label,
+)
 
 
 @shared_task(bind=True, name='patients.analyze_preprocess')
@@ -14,20 +25,6 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
     Async task to perform LLM analysis on uploaded file.
     Updates session with results or error status.
     """
-    from .views import (
-        _load_preprocess_session,
-        _read_uploaded_dataframe,
-        _build_technical_profile,
-        _determine_preprocess_route,
-        _call_ollama_qwen_analysis,
-        _build_preprocess_chunks,
-        _build_retrieval_context,
-        _apply_llm_correction_plan,
-        _build_preprocess_report,
-        _dataframe_to_rows,
-        _save_preprocess_session,
-        resolve_entry_user_label,
-    )
     def update_session_progress(msg):
         """Update session with progress message"""
         try:
@@ -35,28 +32,14 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
             session['progress_message'] = msg
             _save_preprocess_session(session)
         except Exception as e:
-            logger.warning("Could not update preprocess progress", extra={
-                'session_id': session_id,
-                'error': str(e),
-            })
-
-    logger.info("Preprocess task started", extra={
-        'session_id': session_id,
-        'user_id': user_id,
-        'use_llm': bool(use_llm),
-        'file_path': file_path,
-    })
+            print(f"Could not update progress: {e}")
 
     try:
         from django.contrib.auth import get_user_model
         User = get_user_model()
         user = User.objects.get(id=user_id)
     except Exception as e:
-        logger.warning("Could not load preprocess task user", extra={
-            'session_id': session_id,
-            'user_id': user_id,
-            'error': str(e),
-        })
+        print(f"Could not load user {user_id}: {e}")
         user = None
 
     try:
@@ -77,69 +60,22 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
         retrieval_context = _build_retrieval_context(dataframe, chunks, technical_profile, progress_callback=update_session_progress)
         update_session_progress(f"Retrieval: {retrieval_context.get('retrieval_policy')}")
 
-        # Call LLM (this might take time, hence async)
-        if use_llm:
-            route = _determine_preprocess_route(technical_profile)
-            print(
-                f"[LLM] route session={session_id} mode={route.get('mode')} label={route.get('label')} "
-                f"primary={route.get('primary_model')}"
-            )
-            logger.info("Preprocess route selected", extra={
-                'session_id': session_id,
-                'route_mode': route.get('mode'),
-                'route_label': route.get('label'),
-                'primary_model': route.get('primary_model'),
-            })
-            update_session_progress(
-                f"Analyse LLM+RAG avec {route.get('primary_model')}..."
-            )
-            update_session_progress("Construction du contexte de retrieval...")
-            llm_analysis = _call_ollama_qwen_analysis(
-                dataframe,
-                technical_profile,
-                session_id=session_id,
-                progress_callback=update_session_progress,
-            )
-            print(
-                f"[LLM] result session={session_id} model={((llm_analysis or {}).get('model_used') if isinstance(llm_analysis, dict) else None)} "
-                f"attempt={((llm_analysis or {}).get('attempt') if isinstance(llm_analysis, dict) else None)} "
-                f"stage={((llm_analysis or {}).get('stage') if isinstance(llm_analysis, dict) else None)} "
-                f"unavailable={(bool((llm_analysis or {}).get('unavailable')) if isinstance(llm_analysis, dict) else False)}"
-            )
-            logger.info("Preprocess LLM analysis finished", extra={
-                'session_id': session_id,
-                'model_used': (llm_analysis or {}).get('model_used') if isinstance(llm_analysis, dict) else None,
-                'attempt': (llm_analysis or {}).get('attempt') if isinstance(llm_analysis, dict) else None,
-                'stage': (llm_analysis or {}).get('stage') if isinstance(llm_analysis, dict) else None,
-                'unavailable': bool((llm_analysis or {}).get('unavailable')) if isinstance(llm_analysis, dict) else False,
-                'summary': (llm_analysis or {}).get('summary') if isinstance(llm_analysis, dict) else None,
-            })
-        else:
-            update_session_progress("Analyse LLM désactivée...")
-            analysis_pack = {
-                'pack_type': 'structured_analysis_pack',
-                'technical_profile': technical_profile,
-                'preview_rows': _dataframe_to_rows(dataframe.head(3)),
-                'column_samples': {},
-                'meta': {
-                    'selected_columns_count': int(len(dataframe.columns)),
-                    'total_columns_count': int(len(dataframe.columns)),
-                    'preview_rows_count': min(3, int(len(dataframe.index))),
-                    'column_samples_per_column': 0,
-                },
-            }
-            llm_analysis = {
-                'disabled': True,
-                'issues': [],
-                'recommendations': [],
-                'correction_plan': {},
-                'corrected_preview_rows': [],
-                'column_assessment': [],
-                'limitations': [],
-                'analysis_pack': analysis_pack,
-            }
+        # Call LLM only (this might take time, hence async)
+        if not use_llm:
+            update_session_progress("Mode LLM forcé: le paramètre use_llm est ignoré.")
 
-        update_session_progress("Fusion des résultats déterministes et contextuels...")
+        route = _determine_preprocess_route(technical_profile)
+        update_session_progress(
+            f"Route LLM {route.get('label')} avec {route.get('primary_model')}..."
+        )
+        update_session_progress("Construction du contexte de retrieval...")
+        llm_analysis = _call_ollama_qwen_analysis(
+            dataframe,
+            technical_profile,
+            progress_callback=update_session_progress,
+        )
+
+        update_session_progress("Fusion des résultats LLM et contextuels...")
         corrected_df, applied_actions = _apply_llm_correction_plan(dataframe, llm_analysis)
         
         update_session_progress("Génération du rapport final...")
@@ -172,13 +108,6 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
         }
         _save_preprocess_session(session)
 
-        logger.info("Preprocess task completed", extra={
-            'session_id': session_id,
-            'rows': len(dataframe.index),
-            'columns': len(dataframe.columns),
-            'status': 'completed',
-        })
-
         # Clean up temp file
         try:
             os.remove(file_path)
@@ -186,10 +115,9 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
             pass
 
     except Exception as e:
-        logger.exception("Preprocess task failed", extra={
-            'session_id': session_id,
-            'error': str(e),
-        })
+        print(f"Error in analyze_preprocess_async for session {session_id}: {e}")
+        import traceback
+        traceback.print_exc()
         
         # Save error session
         try:

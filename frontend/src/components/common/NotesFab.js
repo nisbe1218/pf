@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Button,
   Box,
@@ -22,6 +23,7 @@ const AUTOSAVE_DELAY_MS = 800;
 
 function NotesFab() {
   const { user } = useContext(AuthContext);
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState('');
   const [lastSavedNotes, setLastSavedNotes] = useState('');
@@ -144,7 +146,10 @@ function NotesFab() {
     return `Derniere sauvegarde: ${lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }, [lastSavedAt]);
 
-  if (!isAuthenticated) {
+  const publicPaths = ['/', '/login', '/unauthorized'];
+  const isOnPublicPage = publicPaths.some((p) => location.pathname === p || location.pathname.startsWith(p + '/'));
+
+  if (!isAuthenticated || isOnPublicPage) {
     return null;
   }
 
