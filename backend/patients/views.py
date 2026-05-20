@@ -1623,41 +1623,59 @@ def _repair_json_text(response_text):
 
 
 def _parse_llm_analysis_response(raw_response):
-    if isinstance(raw_response, dict):
-        return raw_response
-
-    response_text = str(raw_response or '').strip()
-    if not response_text:
+    def _default_preprocess_llm_output():
         return {
-            'summary': 'Le modele n a retourne aucun contenu exploitable.',
-            'issues': [],
+            'dataset_summary': {},
+            'medical_analysis': {},
+            'missing_values_analysis': {},
+            'outliers_analysis': {},
+            'duplicate_analysis': {},
+            'corrections_applied': [],
+            'suspect_values': [],
+            'remaining_risks': [],
             'recommendations': [],
+            'cleaned_dataset_preview': [],
+            'processing_statistics': {},
+            'quality_score': {},
+            'summary': '',
+            'issues': [],
             'correction_plan': {},
             'corrected_preview_rows': [],
             'column_assessment': [],
-            'limitations': ['Reponse vide du modele.'],
+            'limitations': [],
         }
+
+    if isinstance(raw_response, dict):
+        merged = _default_preprocess_llm_output()
+        merged.update(raw_response)
+        return merged
+
+    response_text = str(raw_response or '').strip()
+    if not response_text:
+        default_output = _default_preprocess_llm_output()
+        default_output['summary'] = 'Le modele n a retourne aucun contenu exploitable.'
+        default_output['limitations'] = ['Reponse vide du modele.']
+        return default_output
 
     parsed = _repair_json_text(response_text)
     if parsed is not None:
-        return parsed
+        merged = _default_preprocess_llm_output()
+        merged.update(parsed)
+        return merged
 
     # Dernier recours: tenter de récupérer uniquement la première structure JSON fermée.
     extracted = _extract_balanced_json_candidate(response_text)
     if extracted:
         parsed = _repair_json_text(extracted)
         if parsed is not None:
-            return parsed
+            merged = _default_preprocess_llm_output()
+            merged.update(parsed)
+            return merged
 
-    return {
-        'summary': response_text[:1200],
-        'issues': [],
-        'recommendations': [],
-        'correction_plan': {},
-        'corrected_preview_rows': [],
-        'column_assessment': [],
-        'limitations': ['Le modele a repondu, mais le JSON est invalide.'],
-    }
+    fallback_output = _default_preprocess_llm_output()
+    fallback_output['summary'] = response_text[:1200]
+    fallback_output['limitations'] = ['Le modele a repondu, mais le JSON est invalide.']
+    return fallback_output
 
 
 def _build_llm_payload(dataframe, technical_profile):
@@ -1832,6 +1850,8 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
     rows_count = int(len(dataframe.index))
     issues = []
     recommendations = []
+    suspect_values = []
+    cleaned_dataset_preview = _dataframe_to_rows(dataframe.head(5))
 
     missing_pct = float(technical_profile.get('missing_pct') or 0.0)
     duplicate_rows = int(technical_profile.get('duplicate_rows') or 0)
@@ -1903,7 +1923,56 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
     quality_score = max(5, min(100, int(round(100 - (missing_pct * 0.5) - (duplicate_rows * 2) - min(outlier_total, 20)))))
 
     return {
-        'quality_score': quality_score,
+        'dataset_summary': {
+            'rows': int(len(dataframe.index)),
+            'columns': int(len(dataframe.columns)),
+            'column_names': [str(column) for column in dataframe.columns],
+            'missing_cells': int(technical_profile.get('missing_cells') or 0),
+            'missing_pct': float(missing_pct),
+            'duplicate_rows': int(technical_profile.get('duplicate_rows') or 0),
+        },
+        'medical_analysis': {
+            'summary': 'Analyse locale deterministe sans LLM.',
+            'flags': [],
+            'notes': [reason_message],
+        },
+        'missing_values_analysis': {
+            'missing_pct': float(missing_pct),
+            'strategy': 'deterministic_local',
+            'columns': [
+                {
+                    'column': str(column_meta.get('column') or ''),
+                    'missing_count': int(column_meta.get('missing_count') or 0),
+                    'missing_pct': float(column_meta.get('missing_pct') or 0.0),
+                }
+                for column_meta in technical_profile.get('columns_profile', [])[:20]
+            ],
+        },
+        'outliers_analysis': {
+            'count': int(outlier_total),
+            'method': 'iqr_local',
+        },
+        'duplicate_analysis': {
+            'duplicate_rows': int(duplicate_rows),
+            'method': 'exact_duplicate_rows',
+        },
+        'corrections_applied': [],
+        'suspect_values': suspect_values,
+        'remaining_risks': list(dict.fromkeys([item['explanation'] for item in issues]))[:5],
+        'recommendations': recommendations[:5],
+        'cleaned_dataset_preview': cleaned_dataset_preview,
+        'processing_statistics': {
+            'mode': 'deterministic_fallback',
+            'rows_processed': rows_count,
+            'columns_processed': int(len(dataframe.columns)),
+            'analysis_source': 'pandas',
+            'chunks_count': technical_profile.get('chunk_count', 0),
+        },
+        'quality_score': {
+            'value': quality_score,
+            'scale': '0-100',
+        },
+        'quality_score_value': quality_score,
         'summary': 'Analyse realisee via fallback deterministe local (Pandas) suite a indisponibilite LLM.',
         'issues': issues[:6],
         'recommendations': recommendations[:5],
@@ -1939,8 +2008,32 @@ def _build_deterministic_analysis_fallback(dataframe, technical_profile, reason_
     }
 
 
+def _build_preprocess_instruction_block():
+    return (
+        'Tu es un systeme expert de pretraitement intelligent de donnees medicales specialise en nephrologie, dialyse et analyse clinique. '
+        'Tu dois raisonner comme un expert Big Data, un Data Engineer, un Data Scientist medical, un specialiste qualite des donnees et un nephrologue clinique senior. '
+        'Analyse l ensemble du dataset, detecte les erreurs, identifie les incoherences medicales, corrige uniquement les anomalies fiables, standardise les donnees et produis une version finale propre. '
+        'Tu ne dois jamais halluciner des donnees, inventer des valeurs medicales, modifier silencieusement des donnees critiques ni supprimer automatiquement des donnees importantes. '
+        'Si une valeur est ambigue, marque-la comme suspecte, explique pourquoi et reduis le niveau de confiance. '
+        'Toutes les sorties doivent etre compactes, deterministes et strictement en JSON valide, sans markdown, sans commentaires et sans texte externe.'
+    )
+
+
 def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=None):
     route = _determine_preprocess_route(technical_profile)
+    if route.get('mode') == 'deterministic':
+        route = {
+            'mode': 'balanced',
+            'label': 'llm_only',
+            'reason': 'LLM-only mode: no deterministic pandas fallback.',
+            'primary_model': os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct')),
+            'fallback_model': os.environ.get('OLLAMA_FALLBACK_MODEL', 'qwen2.5:3b-instruct'),
+            'primary_timeout_seconds': _env_int('OLLAMA_PRIMARY_TIMEOUT_SECONDS', min(_env_int('OLLAMA_TIMEOUT_SECONDS', 420), 180)),
+            'fallback_timeout_seconds': _env_int('OLLAMA_FALLBACK_TIMEOUT_SECONDS', _env_int('OLLAMA_TIMEOUT_SECONDS', 420)),
+            'primary_num_predict': _env_int('OLLAMA_NUM_PREDICT', 32),
+            'fallback_num_predict': _env_int('OLLAMA_RETRY_NUM_PREDICT', 24),
+            'clinical_complexity_score': 0,
+        }
     chunks = _build_preprocess_chunks(dataframe, technical_profile)
     retrieval_context = _build_retrieval_context(
         dataframe,
@@ -1953,17 +2046,6 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     technical_profile['chunk_count'] = len(chunks)
     technical_profile['chunks'] = retrieval_context.get('chunk_summaries', [])
     technical_profile['retrieved_chunks'] = retrieval_context.get('retrieved_chunks', [])
-
-    if route.get('mode') == 'deterministic':
-        deterministic_result = _build_deterministic_analysis_fallback(
-            dataframe,
-            technical_profile,
-            route.get('reason', 'Dataset simple: pas de LLM necessaire.'),
-        )
-        deterministic_result['route'] = route
-        deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
-        deterministic_result['rag_context'] = retrieval_context
-        return deterministic_result
 
     model_name = route.get('primary_model') or os.environ.get('OLLAMA_PREPROCESS_MODEL', os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b-instruct'))
     timeout_seconds = int(os.environ.get('OLLAMA_TIMEOUT_SECONDS', '420'))
@@ -2000,21 +2082,21 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
 
     def _build_pass1_prompt(payload_for_prompt):
         return (
-            'Analyse la qualite de ce dataset medical et retourne STRICTEMENT un JSON valide (sans texte hors JSON). '
-            'Schema attendu: '
-            '{quality_score:number(0-100), summary:string, issues:[{severity,category,column,rows,explanation}], '
-            'recommendations:[string], needs_correction_plan:boolean, limitations:[string]}. '
-            'Contraintes: max 6 issues, max 5 recommendations, explications courtes. '
+            _build_preprocess_instruction_block() + ' '
+            'Objectif passe 1: produire un diagnostic complet du dataset et une version nettoyee exploitable. '
+            'Retourne exclusivement un JSON valide. '
+            'Structure obligatoire: {"dataset_summary":{},"medical_analysis":{},"missing_values_analysis":{},"outliers_analysis":{},"duplicate_analysis":{},"corrections_applied":[],"suspect_values":[],"remaining_risks":[],"recommendations":[],"cleaned_dataset_preview":[],"processing_statistics":{},"quality_score":{}}. '
             'Contexte: ' + json.dumps(payload_for_prompt, ensure_ascii=False, default=str)
         )
 
     def _build_pass2_prompt(payload_for_prompt):
         return (
-            'Tu es dans la passe 2. Retourne STRICTEMENT un JSON valide (sans texte hors JSON). '
-            'Objectif: proposer un plan de correction deterministe et minimal a appliquer par Pandas. '
-            'Schema attendu: '
-            '{correction_plan:{rename_columns,drop_columns,value_mappings,fill_missing,type_casts,parse_dates,trim_whitespace_columns,default_values}, limitations:[string]}. '
-            'Contraintes: max 20 operations au total, actions prudentes, aucune invention de colonnes absentes. '
+            _build_preprocess_instruction_block() + ' '
+            'Objectif passe 2: proposer un plan de correction deterministe, minimal et traçable. '
+            'Retourne exclusivement un JSON valide. '
+            'Le JSON doit reprendre la structure de la passe 1 et ajouter un champ top-level correction_plan. '
+            'Structure obligatoire: {"dataset_summary":{},"medical_analysis":{},"missing_values_analysis":{},"outliers_analysis":{},"duplicate_analysis":{},"corrections_applied":[],"suspect_values":[],"remaining_risks":[],"recommendations":[],"cleaned_dataset_preview":[],"processing_statistics":{},"quality_score":{},"correction_plan":{"rename_columns":{},"drop_columns":[],"value_mappings":{},"fill_missing":{},"type_casts":{},"parse_dates":[],"trim_whitespace_columns":[],"default_values":{}}}. '
+            'Ne jamais inventer de valeurs medicales, ne pas supprimer automatiquement les donnees critiques et ne proposer que des corrections hautement probables. '
             'Contexte: ' + json.dumps(payload_for_prompt, ensure_ascii=False, default=str)
         )
 
@@ -2132,14 +2214,24 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
     )
 
     if pass1_result.get('unavailable'):
-        deterministic_result = _build_deterministic_analysis_fallback(
-            dataframe,
-            technical_profile,
-            pass1_result.get('summary', 'Passe 1 indisponible.'),
-        )
-        deterministic_result['section_analyses'] = retrieval_context.get('section_fusion', [])
-        deterministic_result['rag_context'] = retrieval_context
-        return deterministic_result
+        return {
+            'unavailable': True,
+            'summary': pass1_result.get('summary', 'Passe 1 indisponible.'),
+            'issues': [],
+            'recommendations': [],
+            'correction_plan': {},
+            'corrected_preview_rows': [],
+            'column_assessment': [],
+            'limitations': list(dict.fromkeys((pass1_result.get('limitations') if isinstance(pass1_result.get('limitations'), list) else []) + [
+                'Mode LLM-only: aucun fallback Pandas applique.',
+            ])),
+            'analysis_pack': prompt_payload,
+            'model_used': pass1_result.get('model_used'),
+            'stage': pass1_result.get('stage', 'pass1_diagnostic'),
+            'route': route,
+            'section_analyses': retrieval_context.get('section_fusion', []),
+            'rag_context': retrieval_context,
+        }
 
     pass1_issues = pass1_result.get('issues') if isinstance(pass1_result.get('issues'), list) else []
     pass1_recommendations = pass1_result.get('recommendations') if isinstance(pass1_result.get('recommendations'), list) else []

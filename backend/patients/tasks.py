@@ -60,47 +60,22 @@ def analyze_preprocess_async(self, session_id, file_path, user_id, use_llm=True)
         retrieval_context = _build_retrieval_context(dataframe, chunks, technical_profile, progress_callback=update_session_progress)
         update_session_progress(f"Retrieval: {retrieval_context.get('retrieval_policy')}")
 
-        # Call LLM (this might take time, hence async)
-        if use_llm:
-            route = _determine_preprocess_route(technical_profile)
-            if route.get('mode') == 'deterministic':
-                update_session_progress("Analyse déterministe (Pandas)...")
-            else:
-                update_session_progress(
-                    f"Route LLM {route.get('label')} avec {route.get('primary_model')}..."
-                )
-            update_session_progress("Construction du contexte de retrieval...")
-            llm_analysis = _call_ollama_qwen_analysis(
-                dataframe,
-                technical_profile,
-                progress_callback=update_session_progress,
-            )
-        else:
-            update_session_progress("Analyse LLM désactivée...")
-            analysis_pack = {
-                'pack_type': 'structured_analysis_pack',
-                'technical_profile': technical_profile,
-                'preview_rows': _dataframe_to_rows(dataframe.head(3)),
-                'column_samples': {},
-                'meta': {
-                    'selected_columns_count': int(len(dataframe.columns)),
-                    'total_columns_count': int(len(dataframe.columns)),
-                    'preview_rows_count': min(3, int(len(dataframe.index))),
-                    'column_samples_per_column': 0,
-                },
-            }
-            llm_analysis = {
-                'disabled': True,
-                'issues': [],
-                'recommendations': [],
-                'correction_plan': {},
-                'corrected_preview_rows': [],
-                'column_assessment': [],
-                'limitations': [],
-                'analysis_pack': analysis_pack,
-            }
+        # Call LLM only (this might take time, hence async)
+        if not use_llm:
+            update_session_progress("Mode LLM forcé: le paramètre use_llm est ignoré.")
 
-        update_session_progress("Fusion des résultats déterministes et contextuels...")
+        route = _determine_preprocess_route(technical_profile)
+        update_session_progress(
+            f"Route LLM {route.get('label')} avec {route.get('primary_model')}..."
+        )
+        update_session_progress("Construction du contexte de retrieval...")
+        llm_analysis = _call_ollama_qwen_analysis(
+            dataframe,
+            technical_profile,
+            progress_callback=update_session_progress,
+        )
+
+        update_session_progress("Fusion des résultats LLM et contextuels...")
         corrected_df, applied_actions = _apply_llm_correction_plan(dataframe, llm_analysis)
         
         update_session_progress("Génération du rapport final...")
