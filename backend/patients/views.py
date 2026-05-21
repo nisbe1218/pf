@@ -2,6 +2,7 @@ import unicodedata
 import re
 import uuid
 import json
+import ast
 import os
 import io
 from datetime import datetime, timedelta
@@ -28,7 +29,7 @@ from audit.models import AuditLog
 
 from .models import Patient, PatientFormField, PatientFormTemplate
 from .serializers import PatientFormTemplateSerializer, PatientSerializer
-from .preprocess_rag import build_rag_context, estimate_route
+from .preprocess_rag import _env_int, build_rag_context, estimate_route
 
 
 class CustomJSONEncoder(json.JSONEncoder):
@@ -1471,40 +1472,159 @@ def _get_section_prefix_for_column(column_name):
 
 
 def _build_preprocess_chunks(dataframe, technical_profile, max_rows_per_chunk=40):
-    chunks = []
-    columns = [str(column) for column in dataframe.columns.tolist()]
-    grouped_columns = {}
+    """
+    Build semantic chunks for LLM analysis.
 
+    Goals:
+    - Chunk by sections (column groups) using SECTION_PREFIX_MAP.
+    - Preserve patient coherence when a patient identifier column is present.
+    - Limit chunk size by rows and by estimated characters (env: CHUNK_MAX_CHARS).
+    - Expose chunk metadata useful for later merge/merge-intelligent logic.
+    """
+    chunks = []
+    total_rows = int(len(dataframe.index))
+    columns = [str(column) for column in dataframe.columns.tolist()]
+
+    # Configurable limits
+    try:
+        max_chars = int(os.environ.get('CHUNK_MAX_CHARS', '4000'))
+    except Exception:
+        max_chars = 4000
+    try:
+        max_rows = int(os.environ.get('CHUNK_MAX_ROWS', str(max_rows_per_chunk)))
+    except Exception:
+        max_rows = max_rows_per_chunk
+
+    # Heuristic: detect patient identifier column to keep patient rows together
+    patient_id_col = None
+    id_candidates = [c for c in columns if any(token in c.lower() for token in ('patient', 'patient_id', 'id_patient', 'id', 'nid', 'no_patient', 'numero'))]
+    if id_candidates:
+        # prefer exact patient_id-like names
+        for cand in id_candidates:
+            try:
+                unique_count = int(dataframe[cand].nunique(dropna=True))
+                if unique_count > 0 and unique_count < max(2, total_rows // 2):
+                    patient_id_col = cand
+                    break
+            except Exception:
+                continue
+
+    # Group columns by section prefix
+    grouped_columns = {}
     for column in columns:
         grouped_columns.setdefault(_get_section_prefix_for_column(column), []).append(column)
+
+    def _estimate_row_chars(row_series):
+        try:
+            return sum(len(str(v or '')) for v in row_series.tolist())
+        except Exception:
+            return 0
 
     for section_name, section_columns in grouped_columns.items():
         if not section_columns:
             continue
         section_frame = dataframe[section_columns]
-        if len(section_frame.index) <= max_rows_per_chunk:
-            chunks.append({
-                'chunk_id': f'{section_name}:full',
-                'kind': 'section',
-                'section': section_name,
-                'columns': section_columns,
-                'rows_range': [0, max(0, len(section_frame.index) - 1)],
-                'row_count': int(len(section_frame.index)),
-                'preview_rows': _dataframe_to_rows(section_frame.head(3)),
-            })
-        else:
-            for start_index in range(0, len(section_frame.index), max_rows_per_chunk):
-                end_index = min(start_index + max_rows_per_chunk, len(section_frame.index))
-                chunk_frame = section_frame.iloc[start_index:end_index]
+        row_indices = list(section_frame.index)
+
+        if patient_id_col and patient_id_col in dataframe.columns:
+            # Build groups of contiguous rows per patient id to preserve coherence
+            groups = []
+            current_group = {'start': None, 'end': None, 'rows': [], 'chars': 0, 'patient_id': None}
+            for idx in row_indices:
+                pid = dataframe.at[idx, patient_id_col] if patient_id_col in dataframe.columns else None
+                if current_group['patient_id'] is None:
+                    current_group['patient_id'] = pid
+                    current_group['start'] = idx
+                if pid != current_group['patient_id'] and current_group['rows']:
+                    current_group['end'] = current_group['rows'][-1]
+                    groups.append(current_group)
+                    current_group = {'start': idx, 'end': None, 'rows': [], 'chars': 0, 'patient_id': pid}
+                # add row
+                row_series = section_frame.loc[idx] if idx in section_frame.index else section_frame.iloc[0:0]
+                rchars = _estimate_row_chars(row_series)
+                current_group['rows'].append(idx)
+                current_group['chars'] += rchars
+            if current_group['rows']:
+                current_group['end'] = current_group['rows'][-1]
+                groups.append(current_group)
+
+            # Build chunks by aggregating patient groups until limits reached
+            current_chunk = None
+            for grp in groups:
+                if current_chunk is None:
+                    current_chunk = {'rows': [], 'chars': 0, 'start': grp['start'], 'end': grp['end']}
+                # If adding this group would exceed limits and current_chunk not empty, flush
+                if (len(current_chunk['rows']) + len(grp['rows']) > max_rows) or (current_chunk['chars'] + grp['chars'] > max_chars and current_chunk['rows']):
+                    # flush
+                    start_idx = current_chunk['start']
+                    end_idx = current_chunk['end']
+                    chunk_frame = section_frame.loc[current_chunk['rows']]
+                    chunks.append({
+                        'chunk_id': f'{section_name}:rows:{start_idx}-{end_idx}',
+                        'kind': 'row_batch',
+                        'section': section_name,
+                        'columns': section_columns,
+                        'rows_range': [int(start_idx), int(end_idx)],
+                        'row_count': int(len(current_chunk['rows'])),
+                        'preview_rows': _dataframe_to_rows(chunk_frame.head(3)),
+                        'estimated_chars': int(current_chunk['chars']),
+                        'patient_id_column': patient_id_col,
+                    })
+                    current_chunk = {'rows': [], 'chars': 0, 'start': grp['start'], 'end': grp['end']}
+
+                # Add group to current chunk (may exceed limits if a single patient is huge)
+                current_chunk['rows'].extend(grp['rows'])
+                current_chunk['chars'] += grp['chars']
+                current_chunk['end'] = grp['end']
+
+            if current_chunk and current_chunk['rows']:
+                start_idx = current_chunk['start']
+                end_idx = current_chunk['end']
+                chunk_frame = section_frame.loc[current_chunk['rows']]
                 chunks.append({
-                    'chunk_id': f'{section_name}:rows:{start_index}-{end_index - 1}',
+                    'chunk_id': f'{section_name}:rows:{start_idx}-{end_idx}',
                     'kind': 'row_batch',
                     'section': section_name,
                     'columns': section_columns,
-                    'rows_range': [start_index, end_index - 1],
+                    'rows_range': [int(start_idx), int(end_idx)],
+                    'row_count': int(len(current_chunk['rows'])),
+                    'preview_rows': _dataframe_to_rows(chunk_frame.head(3)),
+                    'estimated_chars': int(current_chunk['chars']),
+                    'patient_id_column': patient_id_col,
+                })
+        else:
+            # No patient id: simple row-based chunking with char-limit enforcement
+            start_ptr = 0
+            indices = row_indices
+            n = len(indices)
+            while start_ptr < n:
+                end_ptr = min(start_ptr + max_rows, n)
+                chunk_indices = indices[start_ptr:end_ptr]
+                # tighten if estimated chars exceed max_chars
+                chars = 0
+                for i, idx in enumerate(chunk_indices):
+                    row_series = section_frame.loc[idx]
+                    chars += _estimate_row_chars(row_series)
+                    if chars > max_chars:
+                        # cut here
+                        chunk_indices = chunk_indices[:i+1]
+                        end_ptr = start_ptr + i + 1
+                        break
+
+                start_idx = chunk_indices[0]
+                end_idx = chunk_indices[-1]
+                chunk_frame = section_frame.loc[chunk_indices]
+                chunks.append({
+                    'chunk_id': f'{section_name}:rows:{start_idx}-{end_idx}',
+                    'kind': 'row_batch',
+                    'section': section_name,
+                    'columns': section_columns,
+                    'rows_range': [int(start_idx), int(end_idx)],
                     'row_count': int(len(chunk_frame.index)),
                     'preview_rows': _dataframe_to_rows(chunk_frame.head(3)),
+                    'estimated_chars': int(chars),
                 })
+                start_ptr = end_ptr
 
     if not chunks:
         chunks.append({
@@ -1515,16 +1635,19 @@ def _build_preprocess_chunks(dataframe, technical_profile, max_rows_per_chunk=40
             'rows_range': [0, 0],
             'row_count': 0,
             'preview_rows': [],
+            'estimated_chars': 0,
         })
 
+    # Attach chunk summary into technical_profile for visibility
     technical_profile['chunk_count'] = len(chunks)
     technical_profile['chunks'] = [
         {
             'chunk_id': chunk['chunk_id'],
-            'kind': chunk['kind'],
-            'section': chunk['section'],
-            'row_count': chunk['row_count'],
-            'columns_count': len(chunk['columns']),
+            'kind': chunk.get('kind'),
+            'section': chunk.get('section'),
+            'row_count': chunk.get('row_count'),
+            'columns_count': len(chunk.get('columns', [])),
+            'estimated_chars': int(chunk.get('estimated_chars') or 0),
         }
         for chunk in chunks
     ]
@@ -1598,28 +1721,381 @@ def _extract_balanced_json_candidate(response_text):
 
 
 def _repair_json_text(response_text):
-    cleaned_text = _strip_json_wrappers(response_text)
-    candidate_texts = [cleaned_text]
+    text = _strip_json_wrappers(response_text)
+    if not text:
+        return None
 
-    extracted = _extract_balanced_json_candidate(cleaned_text)
-    if extracted and extracted not in candidate_texts:
-        candidate_texts.insert(0, extracted)
+    # Helper: extract a candidate starting at pos (returns substring and max depth)
+    def _extract_from(text, start_pos):
+        stack = []
+        in_string = False
+        escape = False
+        max_depth = 0
+        for i in range(start_pos, len(text)):
+            ch = text[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch in '{[':
+                stack.append(ch)
+                max_depth = max(max_depth, len(stack))
+                continue
+            if ch in '}]' and stack:
+                opening = stack[-1]
+                if (opening == '{' and ch == '}') or (opening == '[' and ch == ']'):
+                    stack.pop()
+                    if not stack:
+                        return text[start_pos:i + 1], max_depth, True
+        # not balanced: return until end with depth info
+        return text[start_pos:], max_depth, False
 
-    repaired_candidates = []
-    for candidate in candidate_texts:
-        normalized_candidate = candidate.strip()
-        repaired_candidates.append(normalized_candidate)
-        repaired_candidates.append(re.sub(r',\s*([}\]])', r'\1', normalized_candidate))
+    candidates = []
+    # full text as first candidate
+    candidates.append({'text': text, 'source': 'full', 'depth': 0, 'balanced': False})
 
-    for candidate in repaired_candidates:
+    # find all '{' or '[' positions and extract candidates
+    for idx, ch in enumerate(text):
+        if ch in '{[':
+            sub, depth, balanced = _extract_from(text, idx)
+            candidates.append({'text': sub.strip(), 'source': f'pos_{idx}', 'depth': depth, 'balanced': balanced})
+
+    # De-duplicate by text
+    seen = set()
+    uniq_candidates = []
+    for c in candidates:
+        t = c['text']
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        uniq_candidates.append(c)
+
+    best_result = None
+    best_score = -1.0
+
+    original_len = len(re.sub(r"\s+","", text)) or 1
+
+    def try_parse(s):
         try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
+            return json.loads(s)
         except Exception:
+            return None
+
+    for c in uniq_candidates:
+        cand = c['text']
+        # 1) try direct parse
+        parsed = try_parse(cand)
+        if parsed is not None:
+            plen = len(re.sub(r"\s+","", cand))
+            base_score = min(1.0, plen / original_len)
+            method = 'direct_parse'
+            is_partial = (plen < original_len)
+            depth_factor = min(1.0, float(c.get('depth', 0)) / 10.0)
+            # critical keys presence
+            CRITICAL_KEYS = ('dataset_summary', 'medical_analysis', 'corrections_applied')
+            keys_found = 0
+            if isinstance(parsed, dict):
+                for k in CRITICAL_KEYS:
+                    if k in parsed and parsed[k]:
+                        keys_found += 1
+            keys_score = keys_found / max(1, len(CRITICAL_KEYS))
+            # final weighted score
+            score = round(min(1.0, 0.6 * base_score + 0.25 * depth_factor + 0.15 * keys_score), 3)
+            meta = {'recovery_score': score, 'method_used': method, 'is_partial': is_partial, 'depth': c.get('depth', 0), 'keys_found': keys_found}
+            best_result = (parsed, meta) if score > best_score else best_result
+            best_score = max(best_score, score)
+            if score == 1.0:
+                break
+
+        # 2) try removing trailing fragments (trim) progressively at sensible breakpoints
+        trimmed = None
+        trim_points = [m.start() for m in re.finditer(r'[\}\]\",]', cand)]
+        # include full length as last resort
+        trim_points.append(len(cand) - 1)
+        # iterate trimming to the last sensible point
+        for tp in reversed(trim_points):
+            if tp < max(10, len(cand) // 10):
+                break
+            sub = cand[:tp + 1]
+            sub = re.sub(r',\s*([}\]])', r'\1', sub)
+            parsed = try_parse(sub)
+            if parsed is not None:
+                plen = len(re.sub(r"\s+","", sub))
+                score = min(1.0, plen / original_len)
+                method = 'trim_trailing'
+                is_partial = True
+                meta = {'recovery_score': round(score, 3), 'method_used': method, 'is_partial': is_partial}
+                if score > best_score:
+                    best_result = (parsed, meta)
+                    best_score = score
+                trimmed = True
+                break
+
+        if trimmed:
             continue
 
-    return None
+        # 3) try auto-closing based on unmatched openers
+        opens = cand.count('{') + cand.count('[')
+        closes = cand.count('}') + cand.count(']')
+        needed = opens - closes
+        if needed > 0:
+            # produce closers by scanning from end to find which types remain
+            # simple heuristic: close '}' for each '{' and ']' for each '[' in occurrence order
+            # compute stack of unmatched openers
+            stack = []
+            in_string = False
+            escape = False
+            for ch in cand:
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == '\\':
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                    continue
+                if ch in '{[':
+                    stack.append(ch)
+                elif ch in '}]' and stack:
+                    if (stack[-1] == '{' and ch == '}') or (stack[-1] == '[' and ch == ']'):
+                        stack.pop()
+            closers = []
+            while stack:
+                opener = stack.pop()
+                closers.append('}' if opener == '{' else ']')
+            attempt = cand + ''.join(closers)
+            attempt = re.sub(r',\s*([}\]])', r'\1', attempt)
+            parsed = try_parse(attempt)
+            if parsed is not None:
+                plen = len(re.sub(r"\s+","", attempt))
+                base_score = min(1.0, plen / original_len)
+                depth_factor = min(1.0, float(c.get('depth', 0)) / 10.0)
+                keys_found = 0
+                if isinstance(parsed, dict):
+                    for k in ('dataset_summary', 'medical_analysis', 'corrections_applied'):
+                        if k in parsed and parsed[k]:
+                            keys_found += 1
+                keys_score = keys_found / 3.0
+                score = round(min(1.0, 0.6 * base_score + 0.25 * depth_factor + 0.15 * keys_score), 3)
+                method = 'auto_close'
+                is_partial = True
+                meta = {'recovery_score': score, 'method_used': method, 'is_partial': is_partial, 'depth': c.get('depth', 0), 'keys_found': keys_found}
+                if score > best_score:
+                    best_result = (parsed, meta)
+                    best_score = score
+                continue
+
+        # 4) attempt python literal fallback (single quotes, None/True/False)
+        try:
+            py_cand = re.sub(r"\bnull\b", 'None', cand, flags=re.IGNORECASE)
+            py_cand = re.sub(r"\btrue\b", 'True', py_cand, flags=re.IGNORECASE)
+            py_cand = re.sub(r"\bfalse\b", 'False', py_cand, flags=re.IGNORECASE)
+            parsed_py = ast.literal_eval(py_cand)
+            if parsed_py is not None:
+                plen = len(re.sub(r"\s+","", cand))
+                base_score = min(1.0, plen / original_len)
+                depth_factor = min(1.0, float(c.get('depth', 0)) / 10.0)
+                keys_found = 0
+                if isinstance(parsed_py, dict):
+                    for k in ('dataset_summary', 'medical_analysis', 'corrections_applied'):
+                        if k in parsed_py and parsed_py[k]:
+                            keys_found += 1
+                keys_score = keys_found / 3.0
+                score = round(min(1.0, 0.6 * base_score + 0.25 * depth_factor + 0.15 * keys_score), 3)
+                method = 'python_literal'
+                is_partial = True
+                meta = {'recovery_score': score, 'method_used': method, 'is_partial': is_partial, 'depth': c.get('depth', 0), 'keys_found': keys_found}
+                if score > best_score:
+                    best_result = (parsed_py, meta)
+                    best_score = score
+        except Exception:
+            pass
+
+    # If we found a result, normalize return to dict and attach metadata
+    if best_result is not None:
+        parsed_obj, meta = best_result
+
+        # Determine structure type
+        if isinstance(parsed_obj, list):
+            structure_type = 'array_root'
+        elif isinstance(parsed_obj, dict):
+            structure_type = 'object'
+        else:
+            structure_type = 'mixed'
+
+        # Compute domain score with presence + completeness checks
+        CRITICAL_KEYS = ('dataset_summary', 'medical_analysis', 'corrections_applied')
+        presence_score = 0.0
+        completeness_score = 0.0
+
+        def _dataset_summary_complete(ds):
+            if not isinstance(ds, dict):
+                return 0.0
+            # require at least one of these fields to be present and non-empty
+            for key in ('rows', 'columns', 'missing_cells', 'missing_pct'):
+                if key in ds and ds[key] not in (None, {}, [], ''):
+                    return 1.0
+            return 0.0
+
+        def _medical_analysis_complete(ma):
+            if not isinstance(ma, dict):
+                return 0.0
+            # prefer explicit detected anomalies or a non-trivial summary
+            issues = ma.get('issues')
+            if isinstance(issues, (list, tuple)) and len(issues) > 0:
+                return 1.0
+            summary = ma.get('summary') or ''
+            try:
+                if isinstance(summary, str) and len(summary.strip()) >= 20:
+                    return 1.0
+            except Exception:
+                pass
+            # fallback: any other non-empty key indicates some analysis
+            for k, v in ma.items():
+                if k in ('issues', 'summary'):
+                    continue
+                if v not in (None, {}, [], ''):
+                    return 1.0
+            return 0.0
+
+        def _corrections_applied_complete(ca):
+            # must be explicitly present and a list (empty list acceptable)
+            return 1.0 if isinstance(ca, list) else 0.0
+
+        if isinstance(parsed_obj, dict):
+            # presence: count keys that exist (regardless of truthiness)
+            present = 0
+            for k in CRITICAL_KEYS:
+                if k in parsed_obj:
+                    present += 1
+            presence_score = present / float(len(CRITICAL_KEYS))
+
+            # completeness per-key
+            ds_comp = _dataset_summary_complete(parsed_obj.get('dataset_summary'))
+            ma_comp = _medical_analysis_complete(parsed_obj.get('medical_analysis'))
+            ca_comp = _corrections_applied_complete(parsed_obj.get('corrections_applied'))
+            completeness_score = (ds_comp + ma_comp + ca_comp) / float(len(CRITICAL_KEYS))
+
+        elif isinstance(parsed_obj, list):
+            # for array roots, evaluate items that are dicts
+            items = [it for it in parsed_obj if isinstance(it, dict)]
+            if not items:
+                presence_score = 0.0
+                completeness_score = 0.0
+            else:
+                pres_values = []
+                comp_values = []
+                for it in items:
+                    present = 0
+                    for k in CRITICAL_KEYS:
+                        if k in it:
+                            present += 1
+                    pres_values.append(present / float(len(CRITICAL_KEYS)))
+
+                    ds_comp = _dataset_summary_complete(it.get('dataset_summary'))
+                    ma_comp = _medical_analysis_complete(it.get('medical_analysis'))
+                    ca_comp = _corrections_applied_complete(it.get('corrections_applied'))
+                    comp_values.append((ds_comp + ma_comp + ca_comp) / float(len(CRITICAL_KEYS)))
+
+                presence_score = sum(pres_values) / len(pres_values)
+                completeness_score = sum(comp_values) / len(comp_values)
+
+        # combine presence and completeness into domain_score
+        presence_score = round(float(presence_score), 3)
+        completeness_score = round(float(completeness_score), 3)
+        domain_score = round(min(1.0, 0.5 * presence_score + 0.5 * completeness_score), 3)
+
+        # Compute structure score
+        depth_factor = min(1.0, float(meta.get('depth', 0)) / 10.0)
+        parsed_valid = 1.0 if isinstance(parsed_obj, (dict, list)) else 0.0
+        # penalize cases where method indicates no recovery
+        method_used = meta.get('method_used', '') or ''
+        if 'no_recovery' in method_used:
+            parsed_valid = 0.0
+        structure_score = round(min(1.0, 0.7 * parsed_valid + 0.3 * depth_factor), 3)
+
+        # Final combined score (structure/domain split)
+        domain_score = round(float(domain_score), 3)
+        final_score = round(min(1.0, 0.4 * structure_score + 0.6 * domain_score), 3)
+
+        # Domain gate: stricter medical rule
+        # enforce a minimum domain_score threshold for trusting outputs
+        domain_gate = domain_score >= 0.4
+
+        # Annotate meta with presence/completeness breakdown
+        meta.update({
+            'structure_type': structure_type,
+            'structure_score': structure_score,
+            'domain_score': domain_score,
+            'presence_score': presence_score,
+            'completeness_score': completeness_score,
+            'recovery_score': final_score,
+            'domain_gate': domain_gate,
+        })
+
+        # set failure_type: hard if domain gate not satisfied
+        meta['failure_type'] = 'hard' if not domain_gate else 'soft'
+
+        # special handling for arrays: wrap results but require domain inspection
+        if structure_type == 'array_root':
+            wrapped = {'results': parsed_obj}
+            # annotate method
+            meta['method_used'] = meta.get('method_used', '') + '|array_root_wrapped'
+            wrapped.update(meta)
+            wrapped['trusted'] = bool(domain_gate)
+            return wrapped
+
+        # ensure dict and inject missing critical keys if needed
+        if isinstance(parsed_obj, dict):
+            injected = False
+            if 'dataset_summary' not in parsed_obj:
+                parsed_obj['dataset_summary'] = {}
+                injected = True
+            if 'medical_analysis' not in parsed_obj:
+                parsed_obj['medical_analysis'] = {}
+                injected = True
+            if 'corrections_applied' not in parsed_obj:
+                parsed_obj['corrections_applied'] = []
+                injected = True
+            if injected:
+                meta['method_used'] = meta.get('method_used', '') + '|structure_injected'
+                meta['is_partial'] = True
+            parsed_obj.update(meta)
+            # If domain gate failed, mark not trusted explicitly
+            if not domain_gate:
+                parsed_obj['trusted'] = False
+            else:
+                parsed_obj['trusted'] = True
+            return parsed_obj
+
+        # fallback non-dict non-list
+        out = {'recovered_non_dict': parsed_obj}
+        out.update(meta)
+        return out
+
+    # Nothing worked: return structured minimal fallback with low score
+    excerpt = (text[:1000] + '...') if len(text) > 1000 else text
+    return {
+        'recovery_status': 'failed_partial_parse',
+        'raw_excerpt': excerpt,
+        'reason': 'truncated_llm_output',
+        'recovery_score': 0.0,
+        'method_used': 'no_recovery',
+        'is_partial': True,
+        'failure_type': 'hard',
+        'domain_gate': False,
+        'trusted': False,
+    }
 
 
 def _parse_llm_analysis_response(raw_response):
@@ -1643,6 +2119,7 @@ def _parse_llm_analysis_response(raw_response):
             'corrected_preview_rows': [],
             'column_assessment': [],
             'limitations': [],
+            'raw_response': None,
         }
 
     if isinstance(raw_response, dict):
@@ -1661,6 +2138,7 @@ def _parse_llm_analysis_response(raw_response):
     if parsed is not None:
         merged = _default_preprocess_llm_output()
         merged.update(parsed)
+        merged['raw_response'] = response_text
         return merged
 
     # Dernier recours: tenter de récupérer uniquement la première structure JSON fermée.
@@ -1675,6 +2153,7 @@ def _parse_llm_analysis_response(raw_response):
     fallback_output = _default_preprocess_llm_output()
     fallback_output['summary'] = response_text[:1200]
     fallback_output['limitations'] = ['Le modele a repondu, mais le JSON est invalide.']
+    fallback_output['raw_response'] = response_text
     return fallback_output
 
 
@@ -1789,6 +2268,283 @@ def _shrink_llm_payload(payload, max_columns=20, max_preview_rows=2, max_samples
     shrunk['meta'] = meta
 
     return shrunk
+
+
+def _estimate_tokens_from_text(text):
+    try:
+        s = str(text or '')
+        return max(1, int(len(s) / 4))
+    except Exception:
+        return 1
+
+
+def _estimate_prompt_and_rag_tokens(payload_for_prompt, retrieval_context):
+    try:
+        payload_text = json.dumps(payload_for_prompt, ensure_ascii=False, default=str)
+    except Exception:
+        payload_text = str(payload_for_prompt)
+    try:
+        rag_text = json.dumps(retrieval_context or {}, ensure_ascii=False, default=str)
+    except Exception:
+        rag_text = str(retrieval_context)
+    return _estimate_tokens_from_text(payload_text), _estimate_tokens_from_text(rag_text)
+
+
+def _shrink_prompt_for_budget(payload_for_prompt, retrieval_context, available_tokens):
+    """
+    Reduce prompt payload and retrieval_context to fit within available_tokens.
+    Reduction order (priority): history -> retrieved_chunks (RAG secondary) -> column_samples -> preview_rows -> descriptive text
+    """
+    # Work on copies to avoid mutating caller unexpectedly
+    try:
+        payload = json.loads(json.dumps(payload_for_prompt, default=str, ensure_ascii=False))
+    except Exception:
+        payload = dict(payload_for_prompt or {})
+    try:
+        rag = json.loads(json.dumps(retrieval_context or {}, default=str, ensure_ascii=False))
+    except Exception:
+        rag = dict(retrieval_context or {})
+
+    def current_tokens():
+        p_t, r_t = _estimate_prompt_and_rag_tokens(payload, rag)
+        return p_t + r_t
+
+    # Quick no-op
+    if current_tokens() <= available_tokens:
+        return payload, rag
+
+    # 1) Trim history (oldest first)
+    history = payload.get('history') or []
+    if isinstance(history, list) and history:
+        while history and current_tokens() > available_tokens:
+            history.pop(0)
+        payload['history'] = history
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # 2) Reduce retrieved_chunks (RAG secondary) - drop less important chunks first
+    retrieved = rag.get('retrieved_chunks') or []
+    if isinstance(retrieved, list) and retrieved:
+        # keep at least top-1
+        while len(retrieved) > 1 and current_tokens() > available_tokens:
+            retrieved.pop(-1)
+        rag['retrieved_chunks'] = retrieved
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # 3) Reduce column_samples: drop less helpful columns
+    column_samples = payload.get('column_samples') or {}
+    if isinstance(column_samples, dict) and column_samples:
+        cols = list(column_samples.keys())
+        # drop columns from the end until we fit
+        while cols and current_tokens() > available_tokens:
+            col = cols.pop(-1)
+            column_samples.pop(col, None)
+        payload['column_samples'] = column_samples
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # 4) Reduce preview_rows
+    preview = payload.get('preview_rows') or []
+    if isinstance(preview, list) and preview:
+        while preview and current_tokens() > available_tokens:
+            preview.pop(-1)
+        payload['preview_rows'] = preview
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # 5) Remove section_fusion and descriptive summaries
+    if 'section_fusion' in rag:
+        rag.pop('section_fusion', None)
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # 6) Aggressively truncate chunk summaries in retrieved_chunks
+    if isinstance(retrieved, list) and retrieved:
+        for i in range(len(retrieved)):
+            if current_tokens() <= available_tokens:
+                break
+            chunk = retrieved[i]
+            # keep only minimal fields
+            minimal = {
+                'chunk_id': chunk.get('chunk_id'),
+                'section': chunk.get('section'),
+                'row_count': chunk.get('row_count')
+            }
+            retrieved[i] = minimal
+        rag['retrieved_chunks'] = retrieved
+        if current_tokens() <= available_tokens:
+            return payload, rag
+
+    # If still too big, as a last resort remove rag entirely
+    if current_tokens() > available_tokens:
+        rag = {'retrieval_policy': 'none', 'retrieved_chunks': []}
+
+    return payload, rag
+
+
+def _validate_preprocess_llm_output(analysis_result, stage_name, available_columns=None):
+    """
+    Strict server-side validation for LLM output.
+    Returns (is_valid, validation_status, issues).
+    """
+    available_columns = [str(column) for column in (available_columns or [])]
+    issues = []
+
+    if not isinstance(analysis_result, dict):
+        issues.append('Resultat LLM non dictionnaire.')
+        return False, {
+            'chunk_valid': False,
+            'schema_valid': False,
+            'merge_safe': False,
+            'medical_confidence': None,
+            'stage': stage_name,
+            'issues': issues,
+        }, issues
+
+    def _require_type(field_name, expected_type):
+        value = analysis_result.get(field_name)
+        if not isinstance(value, expected_type):
+            issues.append(f'Champ {field_name} invalide ou manquant (type attendu: {expected_type.__name__}).')
+            return False
+        return True
+
+    def _require_list(field_name):
+        return _require_type(field_name, list)
+
+    def _require_dict(field_name):
+        return _require_type(field_name, dict)
+
+    def _check_numeric_range(path, value, min_value=None, max_value=None):
+        if value is None:
+            return True
+        if not isinstance(value, (int, float)):
+            issues.append(f'Champ numerique invalide: {path}.')
+            return False
+        if min_value is not None and value < min_value:
+            issues.append(f'Champ {path} hors borne minimale {min_value}.')
+            return False
+        if max_value is not None and value > max_value:
+            issues.append(f'Champ {path} hors borne maximale {max_value}.')
+            return False
+        return True
+
+    schema_ok = True
+    schema_ok &= _require_dict('dataset_summary')
+    schema_ok &= _require_dict('medical_analysis')
+    schema_ok &= _require_dict('missing_values_analysis')
+    schema_ok &= _require_dict('outliers_analysis')
+    schema_ok &= _require_dict('duplicate_analysis')
+    schema_ok &= _require_list('corrections_applied')
+    schema_ok &= _require_list('suspect_values')
+    schema_ok &= _require_list('remaining_risks')
+    schema_ok &= _require_list('recommendations')
+    schema_ok &= _require_list('cleaned_dataset_preview')
+    schema_ok &= _require_dict('processing_statistics')
+    schema_ok &= _require_dict('quality_score')
+
+    if not isinstance(analysis_result.get('summary'), str):
+        issues.append('Champ summary invalide ou manquant (string attendu).')
+        schema_ok = False
+
+    # Optional but expected for traceability
+    if analysis_result.get('correction_plan') is not None and not isinstance(analysis_result.get('correction_plan'), dict):
+        issues.append('Champ correction_plan invalide (dict attendu).')
+        schema_ok = False
+
+    if not schema_ok:
+        return False, {
+            'chunk_valid': False,
+            'schema_valid': False,
+            'merge_safe': False,
+            'medical_confidence': None,
+            'stage': stage_name,
+            'issues': issues,
+        }, issues
+
+    dataset_summary = analysis_result.get('dataset_summary') or {}
+    processing_statistics = analysis_result.get('processing_statistics') or {}
+    quality_score = analysis_result.get('quality_score') or {}
+    medical_analysis = analysis_result.get('medical_analysis') or {}
+    correction_plan = analysis_result.get('correction_plan') or {}
+
+    business_ok = True
+    for key in ['rows', 'row_count', 'duplicate_rows']:
+        if key in dataset_summary:
+            business_ok &= _check_numeric_range(f'dataset_summary.{key}', dataset_summary.get(key), 0, None)
+    for key in ['rows_processed', 'columns_processed', 'chunk_count']:
+        if key in processing_statistics:
+            business_ok &= _check_numeric_range(f'processing_statistics.{key}', processing_statistics.get(key), 0, None)
+
+    if 'value' in quality_score:
+        business_ok &= _check_numeric_range('quality_score.value', quality_score.get('value'), 0, 100)
+    if 'confidence' in quality_score:
+        business_ok &= _check_numeric_range('quality_score.confidence', quality_score.get('confidence'), 0.0, 1.0)
+
+    if 'confidence' in medical_analysis:
+        business_ok &= _check_numeric_range('medical_analysis.confidence', medical_analysis.get('confidence'), 0.0, 1.0)
+    if 'medical_confidence' in analysis_result:
+        business_ok &= _check_numeric_range('medical_confidence', analysis_result.get('medical_confidence'), 0.0, 1.0)
+
+    merge_safe = True
+    if correction_plan:
+        required_plan_fields = [
+            'rename_columns', 'drop_columns', 'value_mappings', 'fill_missing',
+            'type_casts', 'parse_dates', 'trim_whitespace_columns', 'default_values',
+        ]
+        for field_name in required_plan_fields:
+            value = correction_plan.get(field_name)
+            expected = dict if field_name in {'rename_columns', 'value_mappings', 'fill_missing', 'type_casts', 'default_values'} else list
+            if not isinstance(value, expected):
+                issues.append(f'Champ correction_plan.{field_name} invalide (type {expected.__name__} attendu).')
+                merge_safe = False
+
+        rename_columns = correction_plan.get('rename_columns') or {}
+        drop_columns = correction_plan.get('drop_columns') or []
+        if isinstance(rename_columns, dict):
+            rename_targets = [str(value) for value in rename_columns.values() if value not in [None, '']]
+            if len(rename_targets) != len(set(rename_targets)):
+                issues.append('Conflit de renommage: plusieurs colonnes sources ciblent le meme nom.')
+                merge_safe = False
+            if available_columns:
+                for source_name, target_name in rename_columns.items():
+                    source_name = str(source_name)
+                    target_name = str(target_name)
+                    if source_name in drop_columns:
+                        issues.append(f'Conflit merge: {source_name} est a la fois renomme et supprime.')
+                        merge_safe = False
+                    if target_name in available_columns and target_name != source_name:
+                        issues.append(f'Conflit merge: cible de renommage deja existante ({target_name}).')
+                        merge_safe = False
+
+    if 'limitations' in analysis_result and not isinstance(analysis_result.get('limitations'), list):
+        issues.append('Champ limitations invalide (liste attendue).')
+        schema_ok = False
+
+    # Derive a normalized medical confidence if not explicitly given.
+    medical_confidence = None
+    if isinstance(medical_analysis.get('confidence'), (int, float)):
+        medical_confidence = float(medical_analysis.get('confidence'))
+    elif isinstance(quality_score.get('confidence'), (int, float)):
+        medical_confidence = float(quality_score.get('confidence'))
+    elif isinstance(quality_score.get('value'), (int, float)):
+        medical_confidence = max(0.0, min(1.0, float(quality_score.get('value')) / 100.0))
+
+    if medical_confidence is not None:
+        business_ok &= _check_numeric_range('derived_medical_confidence', medical_confidence, 0.0, 1.0)
+
+    valid = schema_ok and business_ok and merge_safe
+    validation_status = {
+        'chunk_valid': bool(valid),
+        'schema_valid': bool(schema_ok),
+        'merge_safe': bool(valid and merge_safe),
+        'medical_confidence': medical_confidence,
+        'stage': stage_name,
+        'issues': issues,
+        'business_valid': bool(business_ok),
+        'available_columns': available_columns[:60],
+    }
+    return valid, validation_status, issues
 
 
 def _get_ollama_candidate_bases():
@@ -2066,6 +2822,57 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         'section_fusion': retrieval_context.get('section_fusion', []),
         'vector_store': retrieval_context.get('vector_store', {}),
     }
+    # Enforce a strict context budget to avoid Ollama truncation/hallucinations.
+    try:
+        max_context_tokens = int(os.environ.get('MAX_CONTEXT_TOKENS', '8192'))
+    except Exception:
+        max_context_tokens = 8192
+    try:
+        system_prompt_tokens = int(os.environ.get('SYSTEM_PROMPT_TOKENS', '1500'))
+    except Exception:
+        system_prompt_tokens = 1500
+    try:
+        reserved_output_tokens = int(os.environ.get('CONTEXT_OUTPUT_TOKENS', '1000'))
+    except Exception:
+        reserved_output_tokens = 1000
+    try:
+        retry_margin_tokens = int(os.environ.get('CONTEXT_RETRY_MARGIN', '500'))
+    except Exception:
+        retry_margin_tokens = 500
+
+    available_input_tokens = max(128, max_context_tokens - system_prompt_tokens - reserved_output_tokens - retry_margin_tokens)
+
+    # Estimate tokens and shrink payload/retrieval_context if needed
+    before_payload_toks, before_rag_toks = _estimate_prompt_and_rag_tokens(prompt_payload, retrieval_context)
+    before_total = before_payload_toks + before_rag_toks
+    if before_total > available_input_tokens:
+        new_payload, new_rag = _shrink_prompt_for_budget(prompt_payload, retrieval_context, available_input_tokens)
+        prompt_payload = new_payload
+        prompt_payload['rag'] = new_rag
+        # record budget decisions
+        technical_profile.setdefault('context_budget', {})
+        technical_profile['context_budget'].update({
+            'max_context_tokens': max_context_tokens,
+            'system_prompt_tokens': system_prompt_tokens,
+            'reserved_output_tokens': reserved_output_tokens,
+            'retry_margin_tokens': retry_margin_tokens,
+            'available_input_tokens': available_input_tokens,
+            'before_total_input_tokens': before_total,
+            'after_total_input_tokens': _estimate_prompt_and_rag_tokens(prompt_payload, prompt_payload.get('rag'))[0] + _estimate_prompt_and_rag_tokens(prompt_payload, prompt_payload.get('rag'))[1],
+            'shrunk': True,
+        })
+    else:
+        technical_profile.setdefault('context_budget', {})
+        technical_profile['context_budget'].update({
+            'max_context_tokens': max_context_tokens,
+            'system_prompt_tokens': system_prompt_tokens,
+            'reserved_output_tokens': reserved_output_tokens,
+            'retry_margin_tokens': retry_margin_tokens,
+            'available_input_tokens': available_input_tokens,
+            'before_total_input_tokens': before_total,
+            'after_total_input_tokens': before_total,
+            'shrunk': False,
+        })
     fallback_payload = _shrink_llm_payload(
         prompt_payload,
         max_columns=retry_max_columns,
@@ -2153,6 +2960,104 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
                     payload = json.loads(body)
                     raw_response = payload.get('response', '{}')
                     parsed_response = _parse_llm_analysis_response(raw_response)
+                    # If the model returned invalid JSON, attempt targeted JSON-only retries.
+                    json_retry_limit = int(os.environ.get('OLLAMA_JSON_RETRIES', '2'))
+                    json_retry_prompt_suffix = (
+                        ' REGENERATE ONLY valid JSON now. DO NOT include any explanation or markdown. '
+                        'Return strictly the JSON object matching the required structure. '
+                        'If you cannot produce valid JSON, return an empty JSON object {}.'
+                    )
+                    def _is_invalid_json_result(resp):
+                        if not isinstance(resp, dict):
+                            return True
+                        # limitations may include localized strings indicating invalid JSON
+                        lim = resp.get('limitations') or []
+                        for item in lim:
+                            if not isinstance(item, str):
+                                continue
+                            s = item.lower()
+                            # common patterns mentioning JSON invalidity
+                            if 'json' in s and ('invalide' in s or 'invalid' in s or 'non valide' in s):
+                                return True
+                            if 'le modele a repondu' in s and 'json' in s:
+                                return True
+
+                        # If parsing failed to populate expected keys, consider it invalid
+                        if not resp.get('dataset_summary') and not resp.get('medical_analysis') and not resp.get('summary'):
+                            return True
+                        return False
+
+                    if _is_invalid_json_result(parsed_response) and json_retry_limit > 0:
+                        # use the smaller fallback prompt payload if available
+                        regen_base_prompt = attempt.get('prompt')
+                        regen_prompt = None
+                        try:
+                            prev_raw = str(raw_response or '')
+                            regen_prompt = (_build_preprocess_instruction_block() + json_retry_prompt_suffix + ' Previous model output: ' + json.dumps({'prev_response': prev_raw}, ensure_ascii=False))
+                        except Exception:
+                            regen_prompt = (_build_preprocess_instruction_block() + json_retry_prompt_suffix)
+
+                        for retry_idx in range(json_retry_limit):
+                            retry_payload = {
+                                'model': attempt['model'],
+                                'prompt': regen_prompt,
+                                'stream': False,
+                                'format': 'json',
+                                'options': {
+                                    'temperature': 0.0,
+                                    'num_predict': max(1, int(attempt.get('num_predict', 1) // 2)),
+                                },
+                            }
+                            retry_data = json.dumps(retry_payload).encode('utf-8')
+                            try:
+                                # Recreate the Request per-retry to ensure the new body is sent
+                                retry_req = urllib_request.Request(
+                                    ollama_endpoint,
+                                    data=retry_data,
+                                    headers={'Content-Type': 'application/json'},
+                                    method='POST',
+                                )
+                                with urllib_request.urlopen(retry_req, timeout=attempt['timeout_seconds']) as retry_resp:
+                                    retry_body = retry_resp.read().decode('utf-8')
+                                retry_payload_json = json.loads(retry_body)
+                                retry_raw = retry_payload_json.get('response', '{}')
+                                retry_parsed = _parse_llm_analysis_response(retry_raw)
+                                if not _is_invalid_json_result(retry_parsed):
+                                    parsed_response = retry_parsed
+                                    raw_response = retry_raw
+                                    break
+                            except Exception:
+                                continue
+                    available_columns = []
+                    try:
+                        analysis_pack = attempt.get('analysis_pack') or {}
+                        if isinstance(analysis_pack, dict) and isinstance(analysis_pack.get('technical_profile'), dict):
+                            technical_profile = analysis_pack.get('technical_profile') or {}
+                        elif isinstance(analysis_pack, dict) and isinstance(analysis_pack.get('analysis_pack'), dict):
+                            technical_profile = (analysis_pack.get('analysis_pack') or {}).get('technical_profile') or {}
+                        else:
+                            technical_profile = {}
+                        available_columns = [
+                            str(column.get('name') or column.get('column') or '')
+                            for column in (technical_profile.get('columns_profile') or [])
+                            if isinstance(column, dict)
+                        ]
+                        available_columns = [column for column in available_columns if column]
+                    except Exception:
+                        available_columns = []
+
+                    is_valid, validation_status, validation_issues = _validate_preprocess_llm_output(
+                        parsed_response,
+                        stage_name=stage_name,
+                        available_columns=available_columns,
+                    )
+                    if not is_valid:
+                        stage_errors.append(
+                            f"[{stage_name}:{attempt['label']}:{attempt['model']}] validation serveur stricte rejetee: {', '.join(validation_issues[:6])}"
+                        )
+                        continue
+
+                    parsed_response['validation_status'] = validation_status
                     parsed_response['analysis_pack'] = attempt['analysis_pack']
                     parsed_response['model_used'] = attempt['model']
                     parsed_response['attempt'] = attempt['label']
@@ -2200,6 +3105,14 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'analysis_pack': primary_pack,
             'model_used': model_name,
             'stage': stage_name,
+            'validation_status': {
+                'chunk_valid': False,
+                'schema_valid': False,
+                'merge_safe': False,
+                'medical_confidence': None,
+                'stage': stage_name,
+                'issues': limitations,
+            },
         }
 
     _notify_progress('Analyse LLM - passe 1/2 (diagnostic)...')
@@ -2231,6 +3144,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'route': route,
             'section_analyses': retrieval_context.get('section_fusion', []),
             'rag_context': retrieval_context,
+            'validation_status': pass1_result.get('validation_status'),
         }
 
     pass1_issues = pass1_result.get('issues') if isinstance(pass1_result.get('issues'), list) else []
@@ -2304,6 +3218,15 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         },
     }
 
+    final_result['validation_status'] = pass1_result.get('validation_status') or {
+        'chunk_valid': False,
+        'schema_valid': False,
+        'merge_safe': False,
+        'medical_confidence': None,
+        'stage': 'pass1_diagnostic',
+        'issues': ['Validation manquante sur la passe 1.'],
+    }
+
     if pass2_result.get('unavailable'):
         final_result['limitations'] = list(dict.fromkeys(final_result['limitations'] + [
             'Passe 2 indisponible: plan de correction vide utilise.'
@@ -2313,6 +3236,7 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
             'model_used': pass2_result.get('model_used'),
             'attempt': pass2_result.get('attempt'),
         }
+        final_result['validation_status_pass2'] = pass2_result.get('validation_status')
         return final_result
 
     correction_plan = pass2_result.get('correction_plan') if isinstance(pass2_result.get('correction_plan'), dict) else {}
@@ -2322,6 +3246,8 @@ def _call_ollama_qwen_analysis(dataframe, technical_profile, progress_callback=N
         'model_used': pass2_result.get('model_used'),
         'attempt': pass2_result.get('attempt'),
     }
+    final_result['validation_status'] = pass2_result.get('validation_status') or final_result.get('validation_status')
+    final_result['validation_status_pass2'] = pass2_result.get('validation_status')
     if isinstance(pass2_result.get('limitations'), list) and pass2_result.get('limitations'):
         final_result['limitations'] = list(dict.fromkeys(final_result['limitations'] + pass2_result.get('limitations')))
 
